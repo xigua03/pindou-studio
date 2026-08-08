@@ -91,7 +91,12 @@ async function text2Image(prompt) {
       throw new Error('AI 生成完成但未取到图片，请重试')
     }
     if (status === 'FAILED' || status === 'CANCELED') {
-      throw new Error(`AI 生成失败：${taskJson?.output?.message || status}`)
+      const msg = taskJson?.output?.message || status
+      // 内容安全审查拦截：给前端友好提示
+      if (/inappropriate content|sensitive|unsafe|content.*risk/i.test(msg)) {
+        throw new Error('SAFETY:' + msg)
+      }
+      throw new Error(`AI 生成失败：${msg}`)
     }
   }
   throw new Error('AI 生成超时，请稍后重试')

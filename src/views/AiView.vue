@@ -20,7 +20,18 @@ onMounted(() => {
 
 /** 追加拼豆友好提示，提升转图纸效果 */
 function buildPrompt(p: string): string {
-  return `${p}，简洁卡通插画风格，边缘清晰，大色块，背景纯色，适合像素化`
+  return `${p}，简洁卡通插画风格，边缘清晰，大色块，背景纯色，适合像素化，内容健康向上`
+}
+
+/** 把后端/AI 的原始报错翻译成用户能看懂的话 */
+function friendlyError(raw: string): string {
+  if (!raw) return 'AI 生成失败，请稍后重试'
+  if (/SAFETY|inappropriate|sensitive|敏感|不合规/i.test(raw)) {
+    return '内容安全审核未通过：可能是描述中包含了敏感或不合适的内容。请把描述改得更温和、正向一点再试（如避免暴力、血腥、恐怖、争议等词汇）。'
+  }
+  if (/超时|timeout/i.test(raw)) return 'AI 生成超时了，请稍后再试一次。'
+  if (/^AI 生成失败/i.test(raw)) return raw
+  return 'AI 生成失败：' + raw
 }
 
 async function generate() {
@@ -40,13 +51,13 @@ async function generate() {
     })
     const data = (await res.json()) as { ok?: boolean; imageBase64?: string; model?: string; error?: string }
     if (!res.ok || !data.ok) {
-      error.value = data.error || 'AI 生成失败，请检查后端配置'
+      error.value = friendlyError(data.error || '')
       return
     }
     imageBase64.value = data.imageBase64 ?? ''
     usedModel.value = data.model ?? ''
   } catch {
-    error.value = '请求失败：请先运行 npm run server 启动后端服务'
+    error.value = 'AI 服务暂时不可用，请稍后再试'
   } finally {
     generating.value = false
   }
@@ -63,7 +74,7 @@ function useInGenerator() {
   <div class="space-y-5">
     <div>
       <h1 class="text-xl font-bold text-stone-800 sm:text-2xl">🤖 AI 生成图纸</h1>
-      <p class="mt-1 text-sm text-stone-500">输入一段文字描述，AI 先生成图片，再一键转成拼豆图纸。需要本地启动后端（<code class="rounded bg-stone-100 px-1 font-mono">npm run server</code>）并配置千问 API Key。</p>
+      <p class="mt-1 text-sm text-stone-500">输入一段文字描述，AI 先生成图片，再一键转成拼豆图纸。每次生成会消耗少量 AI 服务额度。</p>
     </div>
 
     <div class="grid gap-5 lg:grid-cols-[1fr_1fr]">
@@ -97,7 +108,7 @@ function useInGenerator() {
         </div>
 
         <div v-if="serverOk === false" class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          ⚠ 后端服务未启动：请先运行 <code class="rounded bg-white px-1 font-mono">npm run server</code> 再生成。
+          ⚠ AI 服务暂时不可用，请稍后再试。
         </div>
 
         <button class="btn btn-primary w-full" :disabled="generating" @click="generate">
@@ -126,10 +137,10 @@ function useInGenerator() {
     <section class="card p-5 text-xs leading-6 text-stone-500">
       <h2 class="mb-1 text-sm font-semibold text-stone-700">💡 使用步骤</h2>
       <ol class="list-decimal space-y-1 pl-5">
-        <li>在项目根目录运行 <code class="rounded bg-stone-100 px-1 font-mono">npm run server</code> 启动后端（会自动读 <code class="rounded bg-stone-100 px-1 font-mono">.env</code> 里的 DASHSCOPE_API_KEY）。</li>
         <li>输入想拼的图案描述（如「一只橘猫，卡通大色块」），点「AI 生成图片」。</li>
         <li>等 10~30 秒生成完成后，点「用这张图转图纸」，会自动跳转到图片转图纸页并载入图片。</li>
         <li>在那里继续调宽度/色卡/细节，点「生成图纸」即可得到拼豆图纸。</li>
+        <li>提示：如遇内容安全审核拦截，把描述改得更温和、正向一些（避免暴力/血腥/恐怖/争议等内容）再试。</li>
       </ol>
     </section>
   </div>

@@ -22,12 +22,12 @@
 - **构建**：[Vite 7](https://vitejs.dev) + [Vue 3](https://vuejs.org)（`<script setup>` 组合式 API）+ TypeScript
 - **路由**：vue-router（Hash 模式，任意静态服务器/托管平台可直接部署，无需重写规则）
 - **样式**：[Tailwind CSS v4](https://tailwindcss.com)（`@tailwindcss/vite` 插件）+ 少量自定义 CSS
-- **状态/持久化**：轻量响应式 store（`composables/useStore.ts`）+ `localStorage`，无后端、无登录
+- **状态/持久化**：轻量响应式 store（`composables/useStore.ts`）+ `localStorage`，图纸/收藏/库存纯本地保存，无需登录
 - **图像处理**：HTML5 Canvas 读像素 + **CIEDE2000 色差公式**最近色匹配；Floyd–Steinberg 误差扩散抖动；大图纸（>3000 格）自动用 Canvas 渲染避免 DOM 卡顿
 - **色卡数据**：20 套品牌色卡（MARD、COCO、DODO、卡卡、漫漫、盼盼、咪小窝、小舞、黄豆豆、柿柿、童趣、优肯、Perler、Hama、Nabbi 等），来自 [HansBug/pindou-color-data](https://github.com/HansBug/pindou-color-data)、[get-colors-from-beans](https://git.xiongxiao.me/abearxiong/get-colors-from-beans)、[maxcleme/beadcolors](https://github.com/maxcleme/beadcolors)
 - **部署**：`npm run build` 产物为纯静态文件（`dist/`），可放到 GitHub Pages / Netlify / Vercel / Nginx 等任意地方
 
-> 为什么不用后端？拼豆工具的"图片→图纸"本质是纯本地计算，色卡是静态数据，用户数据就是收藏/图纸/库存三样——用 localStorage 就够，省掉服务器成本、没有登录和隐私负担，这也是"无需登录"的最简实现。
+> **可选后端**：核心功能（图片转图纸、色卡、库存、编辑）全部在浏览器本地完成，不上传数据。只有「跨设备分享」和「AI 生成图纸」需要可选的本地 Node 后端（`npm run server`，见上方运行说明），其他功能不依赖后端也能完整使用。
 
 ## 🚀 运行
 

@@ -670,7 +670,7 @@ function remove() {
           class="mt-2 rounded-lg px-2.5 py-1.5 text-xs"
           :class="shareRemote ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'"
         >
-          {{ shareRemote ? '🌐 已同步到服务器：任何设备打开此链接都能查看并下载' : '⚠ 后端未启动：链接仅在本机浏览器有效（运行 npm run server 后重新生成即可跨设备）' }}
+          {{ shareRemote ? '🌐 已同步：任何设备打开此链接都能查看并下载' : '⚠ 当前链接仅在本机浏览器有效' }}
         </p>
       </template>
       <div class="mt-4 flex flex-wrap gap-2">
