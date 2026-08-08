@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { GenMode, Pattern } from '../types'
 import { PALETTES, getPalette, paletteGroups } from '../data/palettes'
@@ -44,6 +44,13 @@ const onlyOwnedColors = ref(false)
 const boardSize = ref(29)
 // 宽度对齐底板：输出宽度吸附到整板倍数（如 29/58/87…）
 const alignBoard = ref(true)
+
+// 切换底板尺寸时，把当前宽度重新吸附到新底板的整板倍数
+watch(boardSize, (b) => {
+  if (alignBoard.value && width.value > 0 && b > 0) {
+    width.value = Math.max(1, Math.round(width.value / b)) * b
+  }
+})
 // 颜色优化
 const mergeThreshold = ref(0)
 const noiseMin = ref(0)
@@ -369,14 +376,26 @@ function printA4() {
 
           <div>
             <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-stone-500">
-              <label for="width-slider">图纸宽度（豆数）</label>
+              <label for="width-slider">图纸宽度（{{ alignBoard ? '板数' : '豆数' }}）</label>
               <span class="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-brand-600">
-                {{ outputSize.w }}×{{ outputSize.h }}
-                <template v-if="alignBoard && outputSize.w > 0">≈ {{ Math.max(1, Math.round(outputSize.w / boardSize)) }} 板宽</template>
+                <template v-if="alignBoard && outputSize.w > 0">{{ Math.max(1, Math.round(outputSize.w / boardSize)) }} 板 · </template>
+                {{ outputSize.w }}×{{ outputSize.h }} 豆
               </span>
             </div>
-            <input id="width-slider" v-model.number="width" type="range" min="16" max="200" step="1" class="w-full accent-brand-500" />
-            <div class="mt-1 flex justify-between text-[10px] text-stone-300"><span>16</span><span>200</span></div>
+            <input
+              id="width-slider"
+              v-model.number="width"
+              type="range"
+              :min="alignBoard ? boardSize : 16"
+              :max="alignBoard ? Math.max(boardSize, Math.floor(200 / boardSize) * boardSize) : 200"
+              :step="alignBoard ? boardSize : 1"
+              class="w-full accent-brand-500"
+            />
+            <div class="mt-1 flex justify-between text-[10px] text-stone-300">
+              <span>{{ alignBoard ? '1 板' : '16' }}</span>
+              <span>{{ alignBoard ? Math.max(boardSize, Math.floor(200 / boardSize) * boardSize) + ' 豆' : '200' }}</span>
+            </div>
+            <p class="mt-1 text-[11px] text-stone-400">{{ alignBoard ? '拖动选择几块板宽（一格=一块板），板数越多细节越丰富。' : '自由调节图纸宽度（豆数）。' }}</p>
           </div>
 
           <div>
