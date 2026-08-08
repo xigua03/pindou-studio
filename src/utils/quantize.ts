@@ -344,6 +344,7 @@ export function imageToGridColors(
   supersample = 2,
   saturate = 1,
   sharpen = 0,
+  contrast = 0,
   src?: { x: number; y: number; w: number; h: number } | null
 ): Uint8ClampedArray {
   const sw = Math.max(1, width * supersample)
@@ -385,6 +386,13 @@ export function imageToGridColors(
         r = sr
         g = sg
         b = sb
+      }
+      // 对比度：以 128 为中点拉伸/压缩
+      if (contrast !== 0) {
+        const f = 1 + contrast / 100
+        r = (r - 128) * f + 128
+        g = (g - 128) * f + 128
+        b = (b - 128) * f + 128
       }
       const o = (y * width + x) * 4
       out[o] = Math.max(0, Math.min(255, r))
@@ -719,4 +727,27 @@ export function convertPatternPalette(pattern: Pattern, sourcePalette: BeadPalet
   }
   const rows = pattern.rows.map((r) => r.map(mapCode))
   return { ...pattern, paletteId: targetPalette.id, rows }
+}
+
+/**
+ * 颜色数上限：把整张图纸的颜色合并到最多 maxColors 种。
+ * 通过逐步提高相似色合并阈值实现（保证视觉上尽量接近原图），返回新 rows 与合并记录。
+ * 颜色数已 <= maxColors 时原样返回（复制数组）。
+ */
+export function limitColorCount(
+  rows: string[][],
+  palette: BeadPalette,
+  maxColors: number
+): { rows: string[][]; merged: MergeRecord[] } {
+  if (maxColors <= 0) return { rows: rows.map((r) => [...r]), merged: [] }
+  let current = { rows: rows.map((r) => [...r]), merged: [] as MergeRecord[] }
+  let codes = new Set(computeUsedCounts(current.rows).keys())
+  let threshold = 2
+  while (codes.size > maxColors && threshold <= 60) {
+    const res = mergePatternColors(current.rows, palette, { mergeThreshold: threshold, noiseMinCount: 0 })
+    current = { rows: res.rows, merged: [...current.merged, ...res.merged] }
+    codes = new Set(computeUsedCounts(current.rows).keys())
+    threshold += 2
+  }
+  return current
 }

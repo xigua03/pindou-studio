@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -38,6 +38,10 @@ const sharpen = ref(true) // 边缘锐化
 // 上传前裁剪
 const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
+// 对比度（-50 ~ +50，0 不变）
+const contrast = ref(10)
+// 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
+const maxColors = ref(32)
 // 仅用手头颜色（豆仓）
 const onlyOwnedColors = ref(false)
 // 底板尺寸（板数规划）
@@ -219,7 +223,7 @@ async function generate() {
   try {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
-    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, srcRect)
+    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect)
     // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
     const exclude =
       onlyOwnedColors.value && ownedColorCount.value > 0
@@ -244,6 +248,11 @@ async function generate() {
         outW = cropped.w
         outH = cropped.h
       }
+    }
+
+    // 颜色数量上限：自动合并相似色，减少杂色、图案更干净（默认 32 色）
+    if (maxColors.value > 0) {
+      finalRows = limitColorCount(finalRows, palette.value, maxColors.value).rows
     }
     const id = result.value?.id ?? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const pat: Pattern = {
@@ -455,6 +464,26 @@ function printA4() {
                 <input v-model="sharpen" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
                 边缘锐化
               </label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-stone-500">颜色数量上限</label>
+              <select v-model.number="maxColors" class="input !py-1.5">
+                <option :value="0">关闭（全部颜色）</option>
+                <option :value="16">16 色</option>
+                <option :value="24">24 色（接近原图感）</option>
+                <option :value="32">32 色（推荐）</option>
+                <option :value="48">48 色</option>
+              </select>
+              <p class="mt-1 text-[11px] text-stone-400">限制颜色数会自动合并相似色，去掉杂色，图案更干净好拼。</p>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-stone-500">对比度：{{ contrast > 0 ? '+' : '' }}{{ contrast }}</label>
+              <input v-model.number="contrast" type="range" min="-50" max="50" step="1" class="w-full accent-brand-500" />
+              <div class="mt-1 flex justify-between text-[10px] text-stone-400"><span>-50</span><span>+50</span></div>
+              <p class="mt-1 text-[11px] text-stone-400">提高对比度让轮廓更清晰、颜色更分明。</p>
             </div>
           </div>
 
