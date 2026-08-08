@@ -49,8 +49,9 @@ const gridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${props.pattern.width}, ${props.cellSize}px)`
 }))
 
+// 格子 >= 5px 就显示色号，字体随格子自适应缩小（最小 5px）
 const fontSize = computed(() =>
-  props.showCodes && props.cellSize >= 9 ? Math.max(7, Math.round(props.cellSize * 0.38)) : 0
+  props.showCodes && props.cellSize >= 5 ? Math.max(5, Math.round(props.cellSize * 0.36)) : 0
 )
 
 /* ---------- canvas 渲染 ---------- */
@@ -78,8 +79,8 @@ function drawCanvas() {
       const py = y * cell
       ctx.fillStyle = color.hex
       ctx.fillRect(px, py, cell, cell)
-      if (props.showCodes && cell >= 9) {
-        const fs = Math.max(7, cell * 0.38)
+      if (props.showCodes && cell >= 5) {
+        const fs = Math.max(5, cell * 0.36)
         ctx.fillStyle = contrastText(color.hex)
         ctx.font = `600 ${fs}px ui-monospace, "Microsoft YaHei", sans-serif`
         ctx.textAlign = 'center'
