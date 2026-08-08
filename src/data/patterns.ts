@@ -45,3 +45,19 @@ export const BUILTIN_SOURCES: string[] = (() => {
   for (const p of BUILTIN_PATTERNS) if (p.sourceLabel) set.add(p.sourceLabel)
   return [...set]
 })()
+
+/** D19：统计一张图纸的豆子总数（空格不计） */
+export function patternBeadCount(p: Pattern): number {
+  let n = 0
+  for (const row of p.rows) for (const c of row) if (c && c !== '.') n++
+  return n
+}
+
+export type Difficulty = '简单' | '中等' | '复杂'
+/** 按豆子数量粗略分难度：<500 简单 · 500~2000 中等 · >2000 复杂 */
+export function patternDifficulty(p: Pattern): Difficulty {
+  const n = patternBeadCount(p)
+  if (n < 500) return '简单'
+  if (n <= 2000) return '中等'
+  return '复杂'
+}

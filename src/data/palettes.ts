@@ -1,4 +1,6 @@
 import type { BeadColor, BeadPalette } from '../types'
+import { hexToRgb } from '../utils/color'
+import { loadJSON, saveJSON } from '../utils/storage'
 
 import mard221Raw from './palettes/mard-221-github.json'
 import mard291Raw from './palettes/mard-291-github.json'
@@ -78,6 +80,84 @@ export function getPalette(id: string): BeadPalette | undefined {
   return PALETTES.find((p) => p.id === id)
 }
 
+/* ============ E25 自定义调色板（本地持久化） ============ */
+const CUSTOM_PREFIX = 'custom_'
+const builtinIds = new Set(PALETTES.map((p) => p.id))
+// 启动时把已保存的自定义调色板并入 PALETTES（跳过与内置 id 冲突的脏数据）
+const savedCustom = loadJSON<BeadPalette[]>('custom_palettes', [])
+for (const p of savedCustom) {
+  if (p && p.id && p.id.startsWith(CUSTOM_PREFIX) && !builtinIds.has(p.id) && Array.isArray(p.colors) && p.colors.length > 0) {
+    PALETTES.push(p)
+  }
+}
+function persistCustom(): void {
+  saveJSON('custom_palettes', PALETTES.filter((p) => p.id.startsWith(CUSTOM_PREFIX)))
+}
+
+export interface CustomColorInput {
+  code: string
+  hex: string
+}
+export interface CustomPaletteInput {
+  title: string
+  description?: string
+  colors: CustomColorInput[]
+}
+
+export function customPalettes(): BeadPalette[] {
+  return PALETTES.filter((p) => p.id.startsWith(CUSTOM_PREFIX))
+}
+
+function buildCustomColors(colors: CustomColorInput[]): BeadColor[] {
+  const list: BeadColor[] = []
+  const seen = new Set<string>()
+  for (const c of colors) {
+    const code = String(c.code ?? '').trim()
+    const hex = String(c.hex ?? '').trim()
+    if (!code || !/^#[0-9a-fA-F]{3,8}$/.test(hex)) continue
+    if (seen.has(code)) continue
+    seen.add(code)
+    list.push({ code, hex, rgb: [hexToRgb(hex).r, hexToRgb(hex).g, hexToRgb(hex).b], group: 'C' })
+  }
+  return list
+}
+
+export function addCustomPalette(input: CustomPaletteInput): BeadPalette | null {
+  const colors = buildCustomColors(input.colors)
+  if (colors.length === 0) return null
+  const id = CUSTOM_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const pal: BeadPalette = {
+    id,
+    brand: '自定义',
+    title: (input.title ?? '').trim() || '我的调色板',
+    description: (input.description ?? '').trim() || '自定义调色板',
+    count: colors.length,
+    colors
+  }
+  PALETTES.push(pal)
+  persistCustom()
+  return pal
+}
+
+export function updateCustomPaletteColors(id: string, colors: CustomColorInput[]): boolean {
+  const pal = PALETTES.find((p) => p.id === id)
+  if (!pal || !id.startsWith(CUSTOM_PREFIX)) return false
+  const list = buildCustomColors(colors)
+  if (list.length === 0) return false
+  pal.colors = list
+  pal.count = list.length
+  persistCustom()
+  return true
+}
+
+export function deleteCustomPalette(id: string): boolean {
+  const i = PALETTES.findIndex((p) => p.id === id)
+  if (i < 0 || !id.startsWith(CUSTOM_PREFIX)) return false
+  PALETTES.splice(i, 1)
+  persistCustom()
+  return true
+}
+
 export function getDefaultPaletteId(): string {
   return 'mard-221-github'
 }
@@ -90,12 +170,14 @@ export interface PaletteGroup {
 /** Group by brand for <optgroup> dropdowns */
 export function paletteGroups(): PaletteGroup[] {
   const groups: PaletteGroup[] = [
+    { label: '自定义', items: [] },
     { label: '国内品牌', items: [] },
     { label: '进口品牌', items: [] }
   ]
   for (const p of PALETTES) {
-    const g = p.brand === '进口' ? groups[1] : groups[0]
-    g.items.push(p)
+    if (p.brand === '自定义') groups[0].items.push(p)
+    else if (p.brand === '进口') groups[2].items.push(p)
+    else groups[1].items.push(p)
   }
   return groups.filter((g) => g.items.length > 0)
 }

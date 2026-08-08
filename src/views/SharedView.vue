@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Pattern } from '../types'
 import { getPalette } from '../data/palettes'
@@ -16,6 +16,7 @@ import {
 } from '../utils/export'
 import { decompressFromEncodedURIComponent } from 'lz-string'
 import { loadJSON } from '../utils/storage'
+import { remoteGetShare } from '../utils/shareApi'
 
 const route = useRoute()
 
@@ -47,25 +48,53 @@ function entryToPattern(raw: ShareEntry, token: string): Pattern | null {
   }
 }
 
-const pattern = computed<Pattern | null>(() => {
+const pattern = ref<Pattern | null>(null)
+const loading = ref(true)
+
+async function load() {
   const token = String(route.params.token ?? '')
-  if (!token) return null
-  // 新短链接：#/share/<5位字母数字>，从本机已生成的分享映射里读取
+  if (!token) {
+    pattern.value = null
+    loading.value = false
+    return
+  }
+  loading.value = true
+  // 1) 优先从服务器读取（跨设备分享）：npm run server 启动后端后任何设备可打开
+  const remote = await remoteGetShare(token)
+  if (remote && Array.isArray(remote.rows) && remote.paletteId && getPalette(remote.paletteId)) {
+    pattern.value = entryToPattern(remote, token)
+    loading.value = false
+    return
+  }
+  // 2) 回退：本机已生成的短链接映射
   if (/^[A-Za-z0-9]{5}$/.test(token)) {
     const map = loadJSON<Record<string, ShareEntry>>('share_map', {})
     const entry = map[token]
-    if (!entry) return null
-    return entryToPattern(entry, token)
+    if (entry) {
+      pattern.value = entryToPattern(entry, token)
+      loading.value = false
+      return
+    }
   }
-  // 兼容旧链接：LZ 压缩或原始 JSON
+  // 3) 兼容旧链接：LZ 压缩或原始 JSON
   try {
     const rawText = token.startsWith('{') ? token : (decompressFromEncodedURIComponent(token) || token)
     const raw = JSON.parse(rawText) as ShareEntry
-    return entryToPattern(raw, token)
+    const p = entryToPattern(raw, token)
+    if (p) {
+      pattern.value = p
+      loading.value = false
+      return
+    }
   } catch {
-    return null
+    /* ignore */
   }
-})
+  pattern.value = null
+  loading.value = false
+}
+
+onMounted(load)
+watch(() => route.params.token, load)
 
 const palette = computed(() => (pattern.value ? getPalette(pattern.value.paletteId) : undefined))
 const usage = computed(() => (pattern.value ? computeColorUsage(pattern.value) : []))
@@ -84,6 +113,17 @@ function downloadPNG(withCodes: boolean) {
   })
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}${withCodes ? '-色号版' : ''}.png`)
 }
+function downloadPNGTransparent() {
+  if (!pattern.value || !palette.value) return
+  const canvas = patternToCanvas(pattern.value, palette.value, {
+    cellSize: 20,
+    showCodes: false,
+    showGrid: false,
+    background: null,
+    padding: 8
+  })
+  downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-透明背景.png`)
+}
 function exportCSV() {
   if (!pattern.value || !palette.value) return
   downloadText(
@@ -100,7 +140,11 @@ function downloadSheet() {
 </script>
 
 <template>
-  <div v-if="pattern && palette" class="space-y-5">
+  <div v-if="loading" class="card p-10 text-center">
+    <p class="text-sm text-stone-500">正在加载共享图纸…</p>
+  </div>
+
+  <div v-else-if="pattern && palette" class="space-y-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <div class="flex items-center gap-2">
@@ -121,6 +165,7 @@ function downloadSheet() {
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-secondary" @click="downloadPNG(false)">⬇ 下载图</button>
         <button class="btn btn-secondary" @click="downloadPNG(true)">⬇ 色号版</button>
+        <button class="btn btn-secondary" @click="downloadPNGTransparent">⬇ 透明 PNG</button>
         <button class="btn btn-secondary" @click="downloadSheet">🖨 图纸+色号统计</button>
         <button class="btn btn-secondary" @click="exportCSV">⇩ CSV</button>
         <router-link to="/" class="btn btn-primary">去图纸库</router-link>

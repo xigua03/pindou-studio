@@ -27,6 +27,10 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'cell-click', x: number, y: number): void
+  /** C14：拖拽经过的格子（连续标记） */
+  (e: 'cell-drag', x: number, y: number): void
+  /** C14：Shift+拖拽框选矩形区域（含端点） */
+  (e: 'cell-box', x0: number, y0: number, x1: number, y1: number): void
 }>()
 
 const colorMap = computed(() => new Map(props.palette.colors.map((c) => [c.code, c])))
@@ -117,12 +121,11 @@ function drawCanvas() {
   }
 }
 
-function onCanvasClick(e: MouseEvent) {
-  if (!props.clickable) return
+function canvasCellFromEvent(e: MouseEvent): { x: number; y: number } | null {
   const canvas = canvasRef.value
-  if (!canvas) return
+  if (!canvas) return null
   const rect = canvas.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return
+  if (rect.width <= 0 || rect.height <= 0) return null
   const scaleX = canvas.width / rect.width
   const scaleY = canvas.height / rect.height
   const cell = props.cellSize
@@ -132,8 +135,59 @@ function onCanvasClick(e: MouseEvent) {
   const my = (e.clientY - rect.top) * scaleY
   const x = Math.floor((mx - leftW) / cell)
   const y = Math.floor((my - topH) / cell)
-  if (x < 0 || y < 0 || x >= props.pattern.width || y >= props.pattern.height) return
-  emit('cell-click', x, y)
+  if (x < 0 || y < 0 || x >= props.pattern.width || y >= props.pattern.height) return null
+  return { x, y }
+}
+
+let dragStart: { x: number; y: number } | null = null
+let boxStart: { x: number; y: number } | null = null
+// pointerdown 已处理点击时，抑制随后浏览器派发的 click 事件，避免重复
+let suppressClick = false
+
+function onCanvasClick(e: MouseEvent) {
+  if (!props.clickable) return
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  // 兼容合成 click（如自动化测试 / 键盘触发的 click）
+  const p = canvasCellFromEvent(e)
+  if (!p) return
+  emit('cell-click', p.x, p.y)
+}
+
+function onCanvasPointerDown(e: PointerEvent) {
+  if (!props.clickable) return
+  const p = canvasCellFromEvent(e)
+  if (!p) return
+  if (e.shiftKey) {
+    boxStart = p
+    dragStart = null
+  } else {
+    dragStart = p
+    boxStart = null
+    suppressClick = true
+    emit('cell-click', p.x, p.y)
+  }
+}
+function onCanvasPointerMove(e: PointerEvent) {
+  if (!props.clickable || !dragStart) return
+  const p = canvasCellFromEvent(e)
+  if (!p) return
+  emit('cell-drag', p.x, p.y)
+}
+function onCanvasPointerUp(e: PointerEvent) {
+  if (!props.clickable) return
+  if (boxStart) {
+    const p = canvasCellFromEvent(e)
+    if (p) emit('cell-box', boxStart.x, boxStart.y, p.x, p.y)
+    boxStart = null
+  }
+  dragStart = null
+}
+function onCanvasPointerLeave() {
+  dragStart = null
+  boxStart = null
 }
 
 watch([() => props.pattern, () => props.palette, () => props.cellSize, () => props.showCodes, () => props.grid, () => props.progress, () => props.showCoords, () => props.boardSize], () => {
@@ -151,6 +205,11 @@ onMounted(() => {
     class="inline-block"
     :class="clickable ? 'cursor-pointer' : ''"
     style="image-rendering: auto"
+    @pointerdown="onCanvasPointerDown"
+    @pointermove="onCanvasPointerMove"
+    @pointerup="onCanvasPointerUp"
+    @pointerleave="onCanvasPointerLeave"
+    @pointercancel="onCanvasPointerLeave"
     @click="onCanvasClick"
   ></canvas>
   <div v-else class="inline-grid overflow-hidden rounded-sm" :style="gridStyle">

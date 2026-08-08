@@ -14,6 +14,7 @@ watch(
 const navs = [
   { to: '/', label: '图纸库', icon: '🏠' },
   { to: '/generator', label: '图片转图纸', icon: '🖼️' },
+  { to: '/ai', label: 'AI 生成', icon: '🤖' },
   { to: '/palette', label: '色卡', icon: '🎨' },
   { to: '/warehouse', label: '豆仓', icon: '📦' },
   { to: '/mine', label: '我的', icon: '🙋' }

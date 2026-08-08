@@ -7,5 +7,8 @@ Thumbs.db
 .env
 screenshots/
 
-# ��ʱ����/���Խű�������⣩
+# 临时脚本/测试脚本（不入库）
 scripts/_*
+
+# 服务端分享数据（运行时生成，不入库）
+server/data/

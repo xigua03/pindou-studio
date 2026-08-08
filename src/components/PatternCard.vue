@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Pattern, BeadPalette } from '../types'
 import { computeColorUsage } from '../utils/export'
+import { patternDifficulty } from '../data/patterns'
 import PatternGrid from './PatternGrid.vue'
 
 const props = defineProps<{ pattern: Pattern; palette: BeadPalette }>()
@@ -12,6 +13,14 @@ const cell = computed(() => {
 })
 const usage = computed(() => computeColorUsage(props.pattern))
 const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
+const diff = computed(() => patternDifficulty(props.pattern))
+const diffClass = computed(() =>
+  diff.value === '简单'
+    ? 'bg-green-50 text-green-600'
+    : diff.value === '中等'
+      ? 'bg-amber-50 text-amber-600'
+      : 'bg-red-50 text-red-500'
+)
 </script>
 
 <template>
@@ -29,7 +38,10 @@ const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
         </h3>
         <span class="shrink-0 text-xs text-stone-400">{{ pattern.width }}×{{ pattern.height }}</span>
       </div>
-      <p class="mt-1 text-xs text-stone-400">{{ usage.length }} 种颜色 · 共 {{ totalBeads }} 颗豆</p>
+      <div class="mt-1 flex items-center justify-between">
+        <p class="text-xs text-stone-400">{{ usage.length }} 种颜色 · {{ totalBeads }} 颗豆</p>
+        <span class="rounded-full px-2 py-0.5 text-[11px] font-medium" :class="diffClass">{{ diff }}</span>
+      </div>
       <div class="mt-2 flex flex-wrap gap-1">
         <span
           v-for="t in pattern.tags.slice(0, 3)"

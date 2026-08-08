@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { GenMode, Pattern } from '../types'
 import { PALETTES, getPalette, paletteGroups } from '../data/palettes'
@@ -97,11 +97,11 @@ const outputSize = computed(() => {
   const src = effectiveImage.value
   if (!src) return { w: 0, h: 0 }
   const { w, h } = src
-  let outW = Math.max(8, Math.min(200, width.value))
+  let outW = Math.max(8, Math.min(256, width.value))
   let outH = Math.max(8, Math.round((outW * h) / w))
-  if (outH > 200) {
-    outH = 200
-    outW = Math.max(8, Math.round((200 * w) / h))
+  if (outH > 256) {
+    outH = 256
+    outW = Math.max(8, Math.round((256 * w) / h))
   }
   // 宽度对齐底板：吸附到整板倍数，避免出现"不满一块板又超一块板"的宽度
   if (alignBoard.value && boardSize.value > 0) {
@@ -109,9 +109,9 @@ const outputSize = computed(() => {
     const boards = Math.max(1, Math.round(outW / b))
     outW = boards * b
     outH = Math.max(8, Math.round((outW * h) / w))
-    if (outH > 200) {
-      outH = 200
-      outW = Math.max(b, Math.round((200 * w) / h / b) * b)
+    if (outH > 256) {
+      outH = 256
+      outW = Math.max(b, Math.round((256 * w) / h / b) * b)
     }
   }
   return { w: outW, h: outH }
@@ -255,7 +255,7 @@ function computeSuggestion() {
   let base = Math.round(image.value.w / 3)
   base = Math.min(base, b * 4)
   base = Math.max(base, b)
-  const maxW = alignBoard.value ? Math.max(b, Math.floor(200 / b) * b) : 200
+  const maxW = alignBoard.value ? Math.max(b, Math.floor(256 / b) * b) : 256
   base = Math.min(base, maxW)
   if (alignBoard.value) base = Math.round(base / b) * b
   base = Math.min(base, maxW)
@@ -271,6 +271,30 @@ function applySuggestion() {
   generate()
 }
 
+function applyLoadedImage(el: HTMLImageElement, name: string) {
+  cropEnabled.value = false
+  cropRect.value = null
+  image.value = { el, name, w: el.naturalWidth, h: el.naturalHeight }
+  resultName.value = name || '我的拼豆图纸'
+  // 自动检测背景色（四角中位色）
+  bgColor.value = rgbTripleToHex(detectBackgroundColor(el))
+  // 默认宽度按图片尺寸自适应（约 1/4 宽，48-110 之间）；先估算细节复杂度
+  const rawW = Math.max(48, Math.min(110, Math.round(el.naturalWidth / 4)))
+  detailScore.value = estimateDetail(el)
+  // 默认：简单图 2 板起步（约 58 豆宽，细节与工作量平衡），细节复杂的图最多给 4 板
+  let boards = Math.max(1, Math.round(rawW / boardSize.value))
+  if (detailScore.value < 200) boards = Math.min(boards, 2)
+  width.value = alignBoard.value ? Math.max(boardSize.value, boards * boardSize.value) : rawW
+  result.value = null
+  computeSuggestion()
+  if (isComplex.value && suggestedWidth.value > width.value) {
+    width.value = suggestedWidth.value
+    detailNote.value = '自动按图片细节建议了 ' + Math.round(suggestedWidth.value / boardSize.value) + ' 板宽度，保留更多细节（可手动调小）。'
+  } else {
+    detailNote.value = ''
+  }
+}
+
 async function onFile(file: File | undefined) {
   error.value = ''
   if (!file) return
@@ -280,31 +304,23 @@ async function onFile(file: File | undefined) {
   }
   try {
     const el = await loadImageFromFile(file)
-    cropEnabled.value = false
-    cropRect.value = null
-    image.value = { el, name: file.name.replace(/\.[^.]+$/, ''), w: el.naturalWidth, h: el.naturalHeight }
-    resultName.value = image.value.name || '我的拼豆图纸'
-    // 自动检测背景色（四角中位色）
-    bgColor.value = rgbTripleToHex(detectBackgroundColor(el))
-    // 默认宽度按图片尺寸自适应（约 1/4 宽，48-110 之间）；先估算细节复杂度
-    const rawW = Math.max(48, Math.min(110, Math.round(el.naturalWidth / 4)))
-    detailScore.value = estimateDetail(el)
-    // 默认：简单图 2 板起步（约 58 豆宽，细节与工作量平衡），细节复杂的图最多给 4 板
-    let boards = Math.max(1, Math.round(rawW / boardSize.value))
-    if (detailScore.value < 200) boards = Math.min(boards, 2)
-    width.value = alignBoard.value ? Math.max(boardSize.value, boards * boardSize.value) : rawW
-    result.value = null
-    computeSuggestion()
-    if (isComplex.value && suggestedWidth.value > width.value) {
-      width.value = suggestedWidth.value
-      detailNote.value = '自动按图片细节建议了 ' + Math.round(suggestedWidth.value / boardSize.value) + ' 板宽度，保留更多细节（可手动调小）。'
-    } else {
-      detailNote.value = ''
-    }
+    applyLoadedImage(el, file.name.replace(/\.[^.]+$/, ''))
   } catch {
     error.value = '图片加载失败，请换一张试试'
   }
 }
+
+onMounted(() => {
+  // 从「AI 生成图纸」页跳转过来：载入 sessionStorage 里暂存的 AI 图片
+  const ai = sessionStorage.getItem('pd_ai_image')
+  if (ai) {
+    sessionStorage.removeItem('pd_ai_image')
+    const el = new Image()
+    el.onload = () => applyLoadedImage(el, 'AI 生成图片')
+    el.onerror = () => (error.value = 'AI 图片加载失败，请返回 AI 生成页重新生成')
+    el.src = ai
+  }
+})
 
 function autoBg() {
   if (!image.value) return
@@ -578,7 +594,7 @@ function printA4() {
               v-model.number="width"
               type="range"
               :min="alignBoard ? boardSize : 16"
-              :max="alignBoard ? Math.max(boardSize, Math.floor(200 / boardSize) * boardSize) : 200"
+              :max="alignBoard ? Math.max(boardSize, Math.floor(256 / boardSize) * boardSize) : 256"
               :step="alignBoard ? boardSize : 1"
               class="w-full accent-brand-500"
             />
@@ -592,7 +608,7 @@ function printA4() {
             </div>
             <div class="mt-1 flex justify-between text-[10px] text-stone-300">
               <span>{{ alignBoard ? '1 板' : '16' }}</span>
-              <span>{{ alignBoard ? Math.max(boardSize, Math.floor(200 / boardSize) * boardSize) + ' 豆' : '200' }}</span>
+              <span>{{ alignBoard ? Math.max(boardSize, Math.floor(256 / boardSize) * boardSize) + ' 豆' : '256' }}</span>
             </div>
             <p class="mt-1 text-[11px] text-stone-400">{{ alignBoard ? '拖动选择几块板宽（一格=一块板），板数越多细节越丰富。' : '自由调节图纸宽度（豆数）。' }}</p>
           </div>

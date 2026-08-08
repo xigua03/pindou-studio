@@ -24,6 +24,7 @@ import {
   renderBoardLayout
 } from '../utils/export'
 import { buildPatternFromRows, convertPatternPalette } from '../utils/quantize'
+import { remoteSaveShare, remoteDeleteShare, remoteGetShare } from '../utils/shareApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -135,6 +136,35 @@ function toggleCell(x: number, y: number) {
   progressSet.value = next
 }
 
+/** C14：拖拽连续标记为已完成 */
+function dragCell(x: number, y: number) {
+  if (!progressMode.value || !pattern.value) return
+  const key = `${x},${y}`
+  const next = new Set(progressSet.value)
+  next.add(key)
+  progressSet.value = next
+}
+
+/** C14：Shift+拖拽框选矩形区域（区域内全部已标记则取消，否则全部标记） */
+function boxSelect(x0: number, y0: number, x1: number, y1: number) {
+  if (!progressMode.value || !pattern.value) return
+  const minX = Math.min(x0, x1)
+  const maxX = Math.max(x0, x1)
+  const minY = Math.min(y0, y1)
+  const maxY = Math.max(y0, y1)
+  const keys: string[] = []
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) keys.push(`${x},${y}`)
+  }
+  const allDone = keys.every((k) => progressSet.value.has(k))
+  const next = new Set(progressSet.value)
+  for (const k of keys) {
+    if (allDone) next.delete(k)
+    else next.add(k)
+  }
+  progressSet.value = next
+}
+
 function resetProgress() {
   if (!confirm('确定重置这张图纸的拼豆进度吗？')) return
   progressSet.value = new Set()
@@ -198,6 +228,9 @@ const shareId = ref('')
 const shareErr = ref('')
 const shareOk = ref(false)
 const shareHint = ref('')
+// 跨设备分享：是否已同步到服务器
+const shareRemote = ref(false)
+const shareBusy = ref(false)
 
 interface ShareEntry {
   name: string
@@ -233,8 +266,11 @@ function openShare() {
     shareId.value = existingId
     shareUrl.value = `${location.origin}${location.pathname}#/share/${existingId}`
     shareOk.value = true
+    // 检测该链接是否已同步到服务器（决定是否跨设备有效）
+    remoteGetShare(existingId).then((r) => (shareRemote.value = !!r))
   } else {
     shareOk.value = false
+    shareRemote.value = false
     randomShareId()
   }
   showShare.value = true
@@ -244,7 +280,7 @@ function modifyShare() {
   shareErr.value = ''
   shareHint.value = '重新生成后，原来的链接会立即失效'
 }
-function generateShare() {
+async function generateShare() {
   if (!pattern.value) return
   const id = shareId.value.trim()
   if (!/^[A-Za-z0-9]{5}$/.test(id)) {
@@ -258,9 +294,13 @@ function generateShare() {
     shareErr.value = `该链接已存在（${id}），请换一个编号`
     return
   }
+  shareBusy.value = true
   // 生成新链接时让旧链接立即失效（同一张图纸只保留一个有效链接）
-  if (oldId && oldId !== id && map[oldId]) delete map[oldId]
-  map[id] = {
+  if (oldId && oldId !== id) {
+    await remoteDeleteShare(oldId)
+    if (map[oldId]) delete map[oldId]
+  }
+  const entry = {
     name: pattern.value.name,
     paletteId: pattern.value.paletteId,
     rows: pattern.value.rows.map((r) => [...r]),
@@ -268,14 +308,19 @@ function generateShare() {
     createdAt: Date.now(),
     patternKey: pattern.value.id
   }
+  map[id] = entry
   patternShare[pattern.value.id] = id
   saveJSON(SHARE_MAP_KEY, map)
   saveJSON(PATTERN_SHARE_KEY, patternShare)
+  // 同步到服务器：成功则任何设备都能打开；失败则回退为仅本机浏览器
+  const remoteOk = await remoteSaveShare(id, entry)
+  shareRemote.value = remoteOk
   shareUrl.value = `${location.origin}${location.pathname}#/share/${id}`
   shareErr.value = ''
   shareHint.value = ''
   shareOk.value = true
   shareCopied.value = false
+  shareBusy.value = false
 }
 async function copyShareUrl() {
   try {
@@ -314,6 +359,19 @@ function downloadPNG(withCodes: boolean) {
     boardSize: boardSize.value
   })
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}${withCodes ? '-色号版' : ''}.png`)
+}
+
+/** E24：透明背景 PNG（只有豆子的色块，空白格透明） */
+function downloadPNGTransparent() {
+  if (!pattern.value || !palette.value) return
+  const canvas = patternToCanvas(pattern.value, palette.value, {
+    cellSize: 24,
+    showCodes: false,
+    showGrid: false,
+    background: null,
+    padding: 8
+  })
+  downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-透明背景.png`)
 }
 
 function exportCSV() {
@@ -408,6 +466,7 @@ function remove() {
         <button class="btn btn-secondary" @click="copyGrid">{{ copied ? '✓ 已复制' : '⧉ 复制色号' }}</button>
         <button class="btn btn-secondary" @click="downloadPNG(false)">⬇ 下载图</button>
         <button class="btn btn-secondary" @click="downloadPNG(true)">⬇ 色号版</button>
+        <button class="btn btn-secondary" @click="downloadPNGTransparent">⬇ 透明 PNG</button>
         <button class="btn btn-secondary" @click="exportCSV">⇩ CSV</button>
         <button class="btn btn-secondary" @click="downloadSheet">🖨 图纸+色号统计</button>
         <button class="btn btn-secondary" @click="doPrint">🖨 打印</button>
@@ -442,7 +501,7 @@ function remove() {
         </div>
 
         <div v-if="progressMode" class="no-print mb-3 flex flex-wrap items-center gap-3 rounded-xl bg-green-50 px-3 py-2 text-xs text-green-700">
-          <span class="font-medium">🧭 拼豆模式：点击格子标记已完成</span>
+          <span class="font-medium">🧭 拼豆模式：点击格子标记，按住拖动连续标记，Shift+拖拽框选一整块</span>
           <span>已完成 {{ progressDone }}/{{ progressTotal }}（{{ progressPct }}%）</span>
           <div class="h-1.5 w-40 overflow-hidden rounded-full bg-white">
             <div class="h-full rounded-full bg-green-500 transition-all" :style="{ width: progressPct + '%' }"></div>
@@ -501,6 +560,8 @@ function remove() {
               show-coords
               :board-size="boardSize"
               @cell-click="toggleCell"
+              @cell-drag="dragCell"
+              @cell-box="boxSelect"
             />
           </div>
         </div>
@@ -599,12 +660,18 @@ function remove() {
           />
         </div>
         <button class="btn btn-secondary !py-2 text-xs" @click="randomShareId">🎲 随机</button>
-        <button class="btn btn-primary !py-2 text-xs" @click="generateShare">生成链接</button>
+        <button class="btn btn-primary !py-2 text-xs" :disabled="shareBusy" @click="generateShare">{{ shareBusy ? '同步中…' : '生成链接' }}</button>
       </div>
       <p v-if="shareErr" class="mt-2 text-xs text-red-500">{{ shareErr }}</p>
       <p v-if="shareHint" class="mt-2 text-xs text-amber-600">{{ shareHint }}</p>
       <template v-if="shareOk">
         <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
+        <p
+          class="mt-2 rounded-lg px-2.5 py-1.5 text-xs"
+          :class="shareRemote ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'"
+        >
+          {{ shareRemote ? '🌐 已同步到服务器：任何设备打开此链接都能查看并下载' : '⚠ 后端未启动：链接仅在本机浏览器有效（运行 npm run server 后重新生成即可跨设备）' }}
+        </p>
       </template>
       <div class="mt-4 flex flex-wrap gap-2">
         <button v-if="shareOk" class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>

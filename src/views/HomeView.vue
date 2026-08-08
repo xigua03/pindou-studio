@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { BUILTIN_PATTERNS, BUILTIN_TAGS } from '../data/patterns'
+import { BUILTIN_PATTERNS, BUILTIN_TAGS, patternBeadCount, patternDifficulty } from '../data/patterns'
 import { PALETTES, getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
 import PatternCard from '../components/PatternCard.vue'
@@ -8,6 +8,11 @@ import PatternCard from '../components/PatternCard.vue'
 const store = useStore()
 const keyword = ref('')
 const activeTag = ref('全部')
+// D19：难度 / 豆数筛选
+const activeDiff = ref('全部')
+const diffOptions = ['全部', '简单', '中等', '复杂']
+const beadRange = ref('全部')
+const beadRanges = ['全部', '500颗以下', '500~2000颗', '2000颗以上']
 
 const tags = computed(() => ['全部', ...BUILTIN_TAGS])
 
@@ -16,6 +21,13 @@ const filtered = computed(() => {
   return BUILTIN_PATTERNS.filter((p) => {
     const matchTag = activeTag.value === '全部' || p.tags.includes(activeTag.value)
     if (!matchTag) return false
+    const diff = activeDiff.value
+    if (diff !== '全部' && patternDifficulty(p) !== diff) return false
+    const n = patternBeadCount(p)
+    const br = beadRange.value
+    if (br === '500颗以下' && n >= 500) return false
+    if (br === '500~2000颗' && (n < 500 || n > 2000)) return false
+    if (br === '2000颗以上' && n <= 2000) return false
     if (!kw) return true
     return (
       p.name.toLowerCase().includes(kw) ||
@@ -41,7 +53,7 @@ const pageNumbers = computed(() => {
 function goPage(p: number) {
   page.value = Math.max(1, Math.min(p, totalPages.value))
 }
-watch([keyword, activeTag, pageSize], () => {
+watch([keyword, activeTag, activeDiff, beadRange, pageSize], () => {
   page.value = 1
 })
 
@@ -101,7 +113,7 @@ const favCount = computed(() => store.state.favorites.length)
 
     <!-- Gallery -->
     <section>
-      <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="mr-1 text-xs font-medium text-stone-400">分类</span>
         <button
           v-for="t in tags"
@@ -112,6 +124,24 @@ const favCount = computed(() => store.state.favorites.length)
         >
           {{ t }}
         </button>
+      </div>
+
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <span class="mr-1 text-xs font-medium text-stone-400">难度</span>
+        <button
+          v-for="d in diffOptions"
+          :key="d"
+          class="chip"
+          :class="activeDiff === d ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
+          @click="activeDiff = d"
+        >
+          {{ d }}
+        </button>
+        <span class="mx-1 text-stone-200">|</span>
+        <span class="mr-1 text-xs font-medium text-stone-400">豆数</span>
+        <select v-model="beadRange" class="input !w-32 !py-1 text-xs">
+          <option v-for="r in beadRanges" :key="r" :value="r">{{ r }}</option>
+        </select>
       </div>
 
       <div v-if="pagedList.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
