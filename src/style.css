@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #fff3ee;
+  --color-brand-100: #ffe4d6;
+  --color-brand-200: #ffc4a8;
+  --color-brand-300: #ff9e70;
+  --color-brand-400: #ff7a45;
+  --color-brand-500: #ff7043;
+  --color-brand-600: #f4511e;
+  --color-brand-700: #d84315;
+  --color-brand-800: #b03a12;
+  --color-brand-900: #8f2f0f;
+  --color-sun-400: #ffd54f;
+  --color-sun-500: #fdd835;
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-stone-50 text-stone-800 antialiased;
+  font-family: var(--font-sans);
+}
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 通用按钮 */
+.btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition select-none;
+}
+.btn:active {
+  @apply scale-[0.97];
+}
+.btn-primary {
+  @apply bg-brand-500 text-white shadow-sm hover:bg-brand-600;
+}
+.btn-secondary {
+  @apply bg-white text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50;
+}
+.btn-ghost {
+  @apply text-stone-500 hover:bg-stone-100 hover:text-stone-700;
+}
+.btn-danger {
+  @apply bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100;
+}
+.btn:disabled {
+  @apply opacity-50 pointer-events-none;
+}
+
+.card {
+  @apply rounded-2xl bg-white shadow-sm ring-1 ring-stone-200/60;
+}
+
+.input {
+  @apply w-full rounded-xl border-0 bg-white px-3 py-2 text-sm text-stone-800 ring-1 ring-stone-200 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-brand-400;
+}
+
+.chip {
+  @apply inline-flex cursor-pointer items-center rounded-full px-3 py-1 text-xs font-medium ring-1 transition;
+}
+
+/* 打印样式：只打印图纸区域 */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
+  }
+  .print-area {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

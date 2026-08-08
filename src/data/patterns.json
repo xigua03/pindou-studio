@@ -1,0 +1,929 @@
+[
+  {
+    "id": "builtin-heart",
+    "name": "爱心",
+    "description": "经典红色爱心，适合情人节与新手入门练习。",
+    "tags": [
+      "爱心",
+      "节日",
+      "入门",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "R": "F4",
+      "W": "H2"
+    },
+    "rows": [
+      "...RR.....RR...",
+      "..RRRR...RRRR..",
+      ".WRRRRR.RRRRRR.",
+      "RRRRRRRRRRRRRRR",
+      "RRRRRRRRRRRRRRR",
+      "RRRRRRRRRRRRRRR",
+      ".RRRRRRRRRRRRR.",
+      "..RRRRRRRRRRR..",
+      "...RRRRRRRRR...",
+      "....RRRRRRR....",
+      ".....RRRRR.....",
+      "......RRR......",
+      ".......R......."
+    ]
+  },
+  {
+    "id": "builtin-strawberry",
+    "name": "草莓",
+    "description": "甜甜的草莓，带叶子和籽。",
+    "tags": [
+      "水果",
+      "食物",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "G6",
+      "L": "G5",
+      "R": "F4",
+      "S": "H12"
+    },
+    "rows": [
+      "......GGGG......",
+      "....GGGGGGGG....",
+      "..GGGGGGGGGGGG..",
+      "..LLGGGGGGGGLL..",
+      "..LLGGGGGGGGLL..",
+      ".GGRRRRRRRRRRGG.",
+      ".GGRRRRRRRRRRGG.",
+      "GGRRSSRRSSRRSSGG",
+      "GGRRSSRRSSRRSSGG",
+      ".GGRRSSRRSSRRGG.",
+      ".GGRRRRRRRRRRGG.",
+      "..GGRRRRRRRRGG..",
+      "...GGRRRRRRGG...",
+      "....GGRRRRGG....",
+      ".....GGRRGG.....",
+      ".......GG......."
+    ]
+  },
+  {
+    "id": "builtin-watermelon",
+    "name": "西瓜",
+    "description": "夏天的一角西瓜，红瓤黑籽。",
+    "tags": [
+      "水果",
+      "食物",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "G8",
+      "W": "H2",
+      "R": "F4",
+      "S": "H7"
+    },
+    "rows": [
+      "......GGGG......",
+      "....GGWWWWGG....",
+      "..GGWWRRRRWWGG..",
+      ".GGWRRRRRRRRWWG.",
+      "GGWRRSSRRSSRRWWG",
+      "GGWRRSSRRSSRRWWG",
+      ".GGWRRRRRRRRWWG.",
+      "..GGWWRRRRWWGG..",
+      "....GGWWWWGG....",
+      "..GGGGGGGGGGGG.."
+    ]
+  },
+  {
+    "id": "builtin-rainbow",
+    "name": "彩虹",
+    "description": "雨过天晴的彩虹与云朵。",
+    "tags": [
+      "风景",
+      "彩虹",
+      "20格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "R": "F4",
+      "O": "A10",
+      "Y": "A4",
+      "G": "B8",
+      "W": "H2"
+    },
+    "rows": [
+      "........RRRR........",
+      ".......ROOOOOR......",
+      "......ROOYYYYOOR....",
+      ".....ROOYYGGYYOOR...",
+      "....ROOYYGGGGYYOOR..",
+      "....ROOYYGGGGYYOOR..",
+      ".....ROOYYGGYYOOR...",
+      "......ROOOOOOOOR....",
+      ".......RRRRRRRR.....",
+      "....................",
+      ".....WWWW..WWWW.....",
+      "..WWWWWWWWWWWWWWWW..",
+      ".WWWWWWWWWWWWWWWWWW."
+    ]
+  },
+  {
+    "id": "builtin-star",
+    "name": "星星",
+    "description": "闪耀的黄色五角星。",
+    "tags": [
+      "星星",
+      "装饰",
+      "15格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "A": "A5"
+    },
+    "rows": [
+      ".......A.......",
+      ".......A.......",
+      "......AAA......",
+      "......AAA......",
+      ".AAAAAAAAAAAAA.",
+      "AAAAAAAAAAAAAAA",
+      "AAAAAAAAAAAAAAA",
+      "AAAAAAAAAAAAAAA",
+      ".AAAAAAAAAAAAA.",
+      "..AAAAAAAAAAA..",
+      "...AAAAAAAAA...",
+      "....AAAAAAA....",
+      ".....AAAAA.....",
+      "......AAA......",
+      ".......A......."
+    ]
+  },
+  {
+    "id": "builtin-sun",
+    "name": "太阳",
+    "description": "暖洋洋的太阳，带光芒。",
+    "tags": [
+      "风景",
+      "太阳",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "A": "A5"
+    },
+    "rows": [
+      ".......AA.......",
+      "......AAAA......",
+      "..A...AAAA...A..",
+      "...A.AAAAAA.A...",
+      "....AAAAAAAA....",
+      "...AAAAAAAAAA...",
+      "..AAAAAAAAAAAA..",
+      ".AAAAAAAAAAAAAA.",
+      ".AAAAAAAAAAAAAA.",
+      "..AAAAAAAAAAAA..",
+      "...AAAAAAAAAA...",
+      "....AAAAAAAA....",
+      "...A.AAAAAA.A...",
+      "..A...AAAA...A..",
+      "......AAAA......",
+      ".......AA......."
+    ]
+  },
+  {
+    "id": "builtin-cat",
+    "name": "小猫",
+    "description": "圆脸小猫咪，蓝眼睛粉耳朵。",
+    "tags": [
+      "动物",
+      "猫",
+      "20格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "G8",
+      "H": "H19",
+      "E": "E12",
+      "C": "C8",
+      "F": "F3",
+      "W": "H2"
+    },
+    "rows": [
+      "..GGGG........GGGG..",
+      ".GGEEGG......GGEEGG.",
+      "GGEEEEGG....GGEEEEGG",
+      "GGGGGGGGGGGGGGGGGGGG",
+      "GGGHHHHHHHHHHHHHHGGG",
+      "GGHHHHHHHHHHHHHHHHGG",
+      "GGHHCCCHHHHHHCCCHHGG",
+      "GGHHCCCHHHHHHCCCHHGG",
+      "GGHHHHHHHHHHHHHHHHGG",
+      "GGHHHHHHHFHHHHHHHHGG",
+      "GGHHHHHGHHHHHHHHHHGG",
+      "GGHHHHHGHHHHHHGHHHGG",
+      "GWHHHHHHHHHHHHHHHHWG",
+      "GWHHHHHHHHHHHHHHHHWG",
+      "GGHHHHHHHHHHHHHHHHGG",
+      "GGGGHHHHHHHHHHHHGGGG",
+      ".GGGGGGGGGGGGGGGGGG.",
+      "..GGGGGGGGGGGGGGGG.."
+    ]
+  },
+  {
+    "id": "builtin-panda",
+    "name": "熊猫",
+    "description": "憨态可掬的熊猫脸。",
+    "tags": [
+      "动物",
+      "熊猫",
+      "18格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "W": "H2",
+      "N": "H7"
+    },
+    "rows": [
+      "...KK........KK...",
+      "..KKKK......KKKK..",
+      "..KKKK......KKKK..",
+      "..KKKKKKKKKKKKKK..",
+      ".KWWWWWWWWWWWWWWK.",
+      ".KWWWWWWWWWWWWWWK.",
+      "KWWKKKWWWWWWKKKWWK",
+      "KWWKKKWWWWWWKKKWWK",
+      "KWWKKKWWKKWWKKKWWK",
+      "KWWKKKWWKKWWKKKWWK",
+      "KWWWWWWWWWWWWWWWWK",
+      "KWWWWWWWNNWWWWWWWK",
+      "KWWWWWWWWWWWWWWWWK",
+      ".KWWWWWWWWWWWWWWK.",
+      "..KKWWWWWWWWWWKK..",
+      "...KKKKKKKKKKKK...",
+      "....KKKKKKKKKK...."
+    ]
+  },
+  {
+    "id": "builtin-mushroom",
+    "name": "蘑菇",
+    "description": "红伞白点的可爱蘑菇。",
+    "tags": [
+      "植物",
+      "蘑菇",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "R": "F3",
+      "W": "H2",
+      "S": "H19"
+    },
+    "rows": [
+      "......RRRR......",
+      "....RRRRRRRR....",
+      "..RRRRRRRRRRRR..",
+      ".RRRRRRRRRRRRRR.",
+      "RRRRRRRRRRRRRRRR",
+      "RRWWWRRRRRWWRRRR",
+      "RWRRRRRRRRRRRRWR",
+      "RRRRRRRRRRRRRRRR",
+      ".RWWWRRRRWWRRRR.",
+      "RRRRRRRRRRRRRRRR",
+      "..SSSSSSSSSSSS..",
+      "..SSSSSSSSSSSS..",
+      "..SSSSSSSSSSSS..",
+      "...SSSSSSSSSS...",
+      "....SSSSSSSS....",
+      "......SSSS......"
+    ]
+  },
+  {
+    "id": "builtin-sakura",
+    "name": "樱花",
+    "description": "五瓣樱花，春日限定。",
+    "tags": [
+      "植物",
+      "花",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "P": "E5",
+      "Y": "A5",
+      "G": "G6"
+    },
+    "rows": [
+      "...PP......PP...",
+      "..PPPP....PPPP..",
+      ".PPPPPP..PPPPPP.",
+      ".PPPPPPPPPPPPPP.",
+      "PYYPPPPPPPPPPYYP",
+      "PYYPPPPPPPPPPYYP",
+      ".PPPPPPPPPPPPPP.",
+      "..PPPPPPPPPPPP..",
+      "...PPPPPPPPPP...",
+      "....PPPPPPPP....",
+      ".....PPPPPP.....",
+      "......PPPP......",
+      "......GGGG......",
+      "......GGGG......",
+      "......GGGG......",
+      ".......GG......."
+    ]
+  },
+  {
+    "id": "builtin-fox",
+    "name": "小狐狸",
+    "description": "橙色小狐狸，白脸颊黑鼻头。",
+    "tags": [
+      "动物",
+      "狐狸",
+      "20格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "O": "A10",
+      "W": "H2",
+      "K": "H7",
+      "N": "H7"
+    },
+    "rows": [
+      "....KK........KK....",
+      "...OOOO......OOOO...",
+      "..OOOOOO....OOOOOO..",
+      ".OOOOOOOOOOOOOOOOOO.",
+      "OOOOOOOOOOOOOOOOOOOO",
+      "OOWWOOOOOOOOOOOOWWOO",
+      "OOWWWWOOOOKKOOOOWWOO",
+      "OOWWWWWWWWWWWWWWWWOO",
+      "OOWWWWWWWNNWWWWWWWOO",
+      "OOWWWWWWWWWWWWWWWWOO",
+      ".OOWWWWWWWWWWWWWWOO.",
+      "..OOWWWWWWWWWWWWOO..",
+      "...OOOOOOOOOOOOOO...",
+      "....OOOOOOOOOOOO....",
+      ".....OOOOOOOOOO.....",
+      "......OOOOOOOO......"
+    ]
+  },
+  {
+    "id": "builtin-snowman",
+    "name": "雪人",
+    "description": "戴红围巾的雪人。",
+    "tags": [
+      "节日",
+      "雪人",
+      "冬天",
+      "16格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "W": "H2",
+      "K": "H7",
+      "B": "F3"
+    },
+    "rows": [
+      ".......WW.......",
+      "......WWWW......",
+      ".....WWWWWW.....",
+      "....WWWWWWWW....",
+      "...WWWWWWWWWW...",
+      "..WWWWWWWWWWWW..",
+      "..WWKKWWWWKKWW..",
+      "..WWWWWWWWWWWW..",
+      "..WWWWWKKWWWWW..",
+      ".WWWWWWWWWWWWWW.",
+      ".BBBBBBBBBBBBBB.",
+      "..BBBBBBBBBBBB..",
+      "..WWWWWWWWWWWW..",
+      ".WWWWWWWWWWWWWW.",
+      "WWWWWWWWWWWWWWWW",
+      "WWWWKKKKKKKKWWWW",
+      ".WWWWWWWWWWWWWW.",
+      "..WWWWWWWWWWWW.."
+    ]
+  },
+  {
+    "id": "builtin-dino",
+    "name": "小恐龙",
+    "description": "憨憨的绿色小恐龙。",
+    "tags": [
+      "动物",
+      "恐龙",
+      "20格"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "B8",
+      "K": "H7"
+    },
+    "rows": [
+      ".....GGGGG..........",
+      "....GGGGGGG.........",
+      "...GGGGGGGGG........",
+      "..GGGGGGGGGGG.......",
+      ".GGGGGKKGGGGGGG.....",
+      "GGGGGGKKGGGGGGG.....",
+      "GGGGGGGGGGGGGGG.....",
+      "GGGGGGGGGGGGGGGG....",
+      "GGGGGGGGGGGGGGGGG...",
+      ".GGGGGGGGGGGGGGGG...",
+      "..GGGGGGGGGGGGGGG...",
+      "...GGGGGGGGGGGGGG...",
+      "....GGGGGGGGGGGGG...",
+      ".....GGGGGGGGGGGG...",
+      "....GGGGGGGGGGGG....",
+      "...GGGGGGGGGGG......"
+    ]
+  },
+  {
+    "id": "builtin-apple",
+    "name": "苹果",
+    "description": "红苹果加绿叶，简单可爱的小图，适合新手练习。",
+    "tags": [
+      "食物",
+      "水果",
+      "简单"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "B5",
+      "R": "F5",
+      "D": "F8",
+      "T": "F10"
+    },
+    "rows": [
+      ".....GG.......",
+      "....GGGG......",
+      ".....TT.......",
+      "...TTTTTT.....",
+      ".RRRRRRRRRRR..",
+      "RRRRRRRRRRRRRR",
+      "RRRRRRRRRRRRRR",
+      "RRRRRRRRRRRRRR",
+      "RRRRDDDDRRRRRR",
+      "RRRDDDDDDRRRRR",
+      "RRDDDDDDDDRRRR",
+      "RRDDDDDDDDRRRR",
+      "..RRRRRRRRRR..",
+      "....RRRRRR...."
+    ]
+  },
+  {
+    "id": "builtin-bear",
+    "name": "小熊",
+    "description": "圆脸小熊，棕色调，配色简单。",
+    "tags": [
+      "动物",
+      "可爱"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "T": "F10",
+      "K": "H7"
+    },
+    "rows": [
+      ".TTT.......TTT.",
+      ".TTTTT...TTTTT.",
+      "TTTTTTTTTTTTTTT",
+      "TTKTTTTTTTKTTTT",
+      "TTTTTTTTTTTTTTT",
+      ".TTTTTTTTTTTTT.",
+      "..TTTTTTTTTTT..",
+      "..TKKT...TKKT..",
+      "..TTTTTTTTTTT..",
+      "..TTTKTTTKTTT..",
+      "...TTTTTTTTT...",
+      "....TTTTTTT....",
+      "......TTT......"
+    ]
+  },
+  {
+    "id": "builtin-bee",
+    "name": "蜜蜂",
+    "description": "黄黑条纹小蜜蜂，颜色明快。",
+    "tags": [
+      "动物",
+      "昆虫"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "Y": "A5"
+    },
+    "rows": [
+      ".....YYY.......",
+      "....YYYYY......",
+      "...YYKYYKYY....",
+      "...YYYYYYY.....",
+      "..YYYYYYYYY....",
+      "..YYKYYKYYKYY..",
+      ".YYYYYYYYYYYYY.",
+      ".YKYYKYYKYYKYY.",
+      ".YYYYYYYYYYYYY.",
+      "..YYKYYKYYKYY..",
+      "...YYYYYYYYY...",
+      "....YYYYYYY...."
+    ]
+  },
+  {
+    "id": "builtin-butterfly",
+    "name": "蝴蝶",
+    "description": "紫身蓝翅花蝴蝶，色彩丰富。",
+    "tags": [
+      "动物",
+      "昆虫",
+      "花"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "V": "D21",
+      "B": "C8",
+      "S": "C24"
+    },
+    "rows": [
+      "..V.......V....",
+      ".VVV.....VVV...",
+      "VVKVVVVVVVKVV..",
+      "VVVVVVVVVVVVV..",
+      ".VVVVVVVVVVVVV.",
+      "..VVVVVVVVVVV..",
+      "..BB..BB..BB...",
+      ".BBBB.BBBB.BBBB",
+      "..BB...BB...BB.",
+      "....B...B....B.",
+      "..SS...SS......",
+      ".SSSS.SSSS.....",
+      "..SS...SS......"
+    ]
+  },
+  {
+    "id": "builtin-carrot",
+    "name": "胡萝卜",
+    "description": "橙色胡萝卜配绿色叶子，简单易拼。",
+    "tags": [
+      "食物",
+      "蔬菜"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "N": "B12",
+      "O": "G6"
+    },
+    "rows": [
+      ".....NN........",
+      "...NNNNNN......",
+      ".....N.........",
+      "....NNNN.......",
+      ".....N.........",
+      "...NNNNN.......",
+      "..OOOOOOO......",
+      ".OOOOOOOOO.....",
+      "OOOOOOOOOOO....",
+      "OOOOOOOOOOOO...",
+      ".OOOOOOOOOOO...",
+      "..OOOOOOOOO....",
+      "...OOOOOOO.....",
+      "....OOOOO......"
+    ]
+  },
+  {
+    "id": "builtin-cherry",
+    "name": "樱桃",
+    "description": "两颗红樱桃，小巧可爱。",
+    "tags": [
+      "食物",
+      "水果"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "B5",
+      "R": "F5"
+    },
+    "rows": [
+      "....GG.......",
+      "..GGGGGG.....",
+      ".....G.......",
+      "....GGG......",
+      "..RR..RR.....",
+      ".RRRR.RRRR...",
+      "RRRRR.RRRRR..",
+      "RRRRR.RRRRR..",
+      "RRRRR.RRRRR..",
+      ".RRR...RRR...",
+      ".RR.....RR...",
+      "RR.......RR..",
+      "R.........R.."
+    ]
+  },
+  {
+    "id": "builtin-tree",
+    "name": "圣诞树",
+    "description": "绿色圣诞树，顶部黄色星星，节日气氛。",
+    "tags": [
+      "节日",
+      "圣诞",
+      "植物"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "T": "F10",
+      "G": "B5",
+      "Y": "A5"
+    },
+    "rows": [
+      "......Y.......",
+      ".....YYY......",
+      "....GGGGG.....",
+      "...GGGGGGG....",
+      "....GGGGG.....",
+      "...GGGGGGG....",
+      "..GGGGGGGGG...",
+      "...GGGGGGG....",
+      "..GGGGGGGGG...",
+      ".GGGGGGGGGGG..",
+      "..GGGGGGGGG...",
+      ".GGGGGGGGGGG..",
+      "GGGGGGGGGGGGG.",
+      "....TTTTT.....",
+      "....TTTTT.....",
+      ".....TTT......"
+    ]
+  },
+  {
+    "id": "builtin-duck",
+    "name": "小鸭子",
+    "description": "黄色小鸭，圆滚滚超可爱。",
+    "tags": [
+      "动物",
+      "可爱"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "Y": "A5"
+    },
+    "rows": [
+      "......YYYYY......",
+      "....YYYYYYYYY....",
+      "...YYYYYYYYYYY...",
+      "..YYYYYYYYYYYYYY.",
+      "..YYYYYYYYYYYYYY.",
+      "..KKYYYYYYYYYYY..",
+      "..KYYYYYYYYYY....",
+      "...YYYYYYYYYYYY..",
+      "...YYYYYYYYYYYY..",
+      "....YYYYYYYYY....",
+      ".....YYYYYYY.....",
+      "......YYYYY......"
+    ]
+  },
+  {
+    "id": "builtin-flower",
+    "name": "花朵",
+    "description": "红芯黄瓣小花配绿叶。",
+    "tags": [
+      "植物",
+      "花"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "B5",
+      "Y": "A5",
+      "R": "F5"
+    },
+    "rows": [
+      ".....RRR.......",
+      "....RRRRR......",
+      "..RRRRRRRRR....",
+      "..RYYRRRRYYR...",
+      "..RRRRRRRRR....",
+      "...RRRRRRR.....",
+      "....RRRRR......",
+      ".....RRR.......",
+      ".....GGG.......",
+      "....GGGGG......",
+      "..GGGGGGGGG....",
+      "..GGGGGGGGG....",
+      "...GGGGGGG.....",
+      "....GGGGG......"
+    ]
+  },
+  {
+    "id": "builtin-frog",
+    "name": "青蛙",
+    "description": "大眼睛绿青蛙，呆萌可爱。",
+    "tags": [
+      "动物",
+      "可爱"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "G": "B5",
+      "K": "H7"
+    },
+    "rows": [
+      "..GGGG...GGGG..",
+      ".GGGGGG.GGGGGG.",
+      "GGGGGGGGGGGGGGG",
+      "GGGGGGGGGGGGGGG",
+      "GGKGGGGGGGGKGGG",
+      "GGGGGGGGGGGGGGG",
+      "GGGGGGGGGGGGGGG",
+      ".GGGGGGGGGGGGG.",
+      "..GGGGGGGGGGG..",
+      "..GGKGGGGKGGG..",
+      "..GGGGGGGGGGG..",
+      "...GGGGGGGGG..."
+    ]
+  },
+  {
+    "id": "builtin-icecream",
+    "name": "冰淇淋",
+    "description": "粉色雪糕配奶油蛋筒，甜甜蜜蜜。",
+    "tags": [
+      "食物",
+      "甜点"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "T": "F10",
+      "K": "H7",
+      "P": "F22"
+    },
+    "rows": [
+      ".....PPP.......",
+      "....PPPPP......",
+      "...PPPPPPP.....",
+      "...PPKPPKPP....",
+      "...PPPPPPP.....",
+      "....PPPPP......",
+      ".....PPP.......",
+      "....TTTTT......",
+      "..TTTTTTTTT....",
+      ".TTTTTTTTTTT...",
+      ".TTTTTTTTTTT...",
+      ".TTTTTTTTTTT...",
+      ".TTTTTTTTTTT...",
+      "..TTTTTTTTT....",
+      "...TTTTTTT....."
+    ]
+  },
+  {
+    "id": "builtin-moon",
+    "name": "月亮",
+    "description": "弯弯月亮，安静又好看。",
+    "tags": [
+      "天空",
+      "简单"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "Y": "A5"
+    },
+    "rows": [
+      "....YYYY.......",
+      "...YYYYYY......",
+      "..YYYYYYYY.....",
+      "..YYYYYYYYY....",
+      "..YYYYYYYYY....",
+      "..YYYYYYYYY....",
+      "...YYYYYYYY....",
+      "...YYYYYYYYY...",
+      "....YYYYYYYY...",
+      "....YYYYYYY....",
+      ".....YYYYY.....",
+      "......YYY......",
+      ".......Y......."
+    ]
+  },
+  {
+    "id": "builtin-pumpkin",
+    "name": "南瓜",
+    "description": "万圣节南瓜灯，橙色主调。",
+    "tags": [
+      "节日",
+      "万圣节",
+      "食物"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "T": "F10",
+      "K": "H7",
+      "O": "G6"
+    },
+    "rows": [
+      ".....TTTT.......",
+      "....TTTTTT......",
+      "..TTTTTTTTTT....",
+      "..TTTTTTTTTT....",
+      ".OOOOOOOOOOOOO..",
+      "OOOOOOOOOOOOOOO.",
+      "OOOOOOOOOOOOOOO.",
+      "OOOOOOOOOOOOOOO.",
+      "OOOOKKKKKKOOOOO.",
+      "OOOOOOOOOOOOOOO.",
+      ".OOOOOOOOOOOOO..",
+      "..OOOOOOOOOOO..."
+    ]
+  },
+  {
+    "id": "builtin-rabbit",
+    "name": "兔子",
+    "description": "长耳朵白兔子，粉色小脚丫。",
+    "tags": [
+      "动物",
+      "可爱"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "W": "H2",
+      "P": "F22"
+    },
+    "rows": [
+      "..WWW.......WWW..",
+      ".WWWWW.....WWWWW.",
+      "WWWWWWW...WWWWWWW",
+      "WWWWWWWWWWWWWWWWW",
+      "WWWWWWWWWWWWWWWWW",
+      "WWKWWWWWWWWWWKWWW",
+      "WWWWWWWWWWWWWWWWW",
+      "WWWWWWWWWWWWWWWWW",
+      ".WWWWWWWWWWWWWWW.",
+      "..WWWWWWWWWWWWW..",
+      "..WPPW.....WPPW..",
+      "..WWWWWWWWWWWWW..",
+      "...WWWWWWWWWWW...",
+      "....WWWWWWWWW....",
+      "......WWWWW......"
+    ]
+  },
+  {
+    "id": "builtin-rocket",
+    "name": "火箭",
+    "description": "红色火箭飞向太空，白蓝火焰。",
+    "tags": [
+      "天空",
+      "太空",
+      "交通工具"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "K": "H7",
+      "W": "H2",
+      "R": "F5"
+    },
+    "rows": [
+      "......R........",
+      ".....RRR.......",
+      "....RRRRR......",
+      "...RRRRRRR.....",
+      "...RRKKKRR.....",
+      "...RRKKKRR.....",
+      "...RRKKKRR.....",
+      "...RRRRRRR.....",
+      "..RRRRRRRRR....",
+      ".RRWWWWWWWRR...",
+      "RRWWWWWWWWWRR..",
+      "RRRWWWWWRRRR...",
+      "RRWWWWWWWWRR...",
+      ".RRWWWWWWWRR...",
+      "..RRRRRRRRR....",
+      "...RR.....R...."
+    ]
+  },
+  {
+    "id": "builtin-turtle",
+    "name": "乌龟",
+    "description": "绿色小乌龟，慢慢爬。",
+    "tags": [
+      "动物",
+      "可爱"
+    ],
+    "paletteId": "mard-221-github",
+    "legend": {
+      "N": "B12",
+      "G": "B5",
+      "K": "H7"
+    },
+    "rows": [
+      "......GGGG.......",
+      ".....GGGGGG......",
+      "....GGGGGGGG.....",
+      "...GGGGGGGGGG....",
+      "...GNNNNNNNNG....",
+      "..GNNNNNNNNNNG...",
+      "..GNNKNNNNKNG....",
+      "..GNNNNNNNNNG....",
+      "..GNNNNNNNNNG....",
+      "..GNNNNNNNNNG....",
+      "...GGGGGGGGGG....",
+      "....GGGGGGGG.....",
+      "....GG....GG.....",
+      "...GG......GG...."
+    ]
+  }
+]
