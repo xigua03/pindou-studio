@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { paletteGroups } from '../data/palettes'
 import { remoteHealth } from '../utils/shareApi'
+import { useAuth, type AiUsage } from '../composables/useAuth'
+import { getToken } from '../utils/api'
 
 const router = useRouter()
 const prompt = ref('一只可爱的橘猫，卡通插画，大色块')
@@ -13,9 +15,19 @@ const error = ref('')
 const imageBase64 = ref('')
 const usedModel = ref('')
 const serverOk = ref<boolean | null>(null)
+const auth = useAuth()
+const { isLoggedIn } = auth
+const usage = ref<AiUsage | null>(null)
 
 onMounted(() => {
   remoteHealth().then((h) => (serverOk.value = h ? h.ai : false))
+  if (auth.state.user) {
+    auth.aiUsage().then((u) => (usage.value = u)).catch(() => {})
+  } else {
+    auth.fetchMe().then(() => {
+      if (auth.state.user) auth.aiUsage().then((u) => (usage.value = u)).catch(() => {})
+    })
+  }
 })
 
 /** 追加拼豆友好提示，提升转图纸效果 */
@@ -46,7 +58,7 @@ async function generate() {
   try {
     const res = await fetch('/api/ai/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: 'Bearer ' + getToken() } : {}) },
       body: JSON.stringify({ prompt: buildPrompt(p) })
     })
     const data = (await res.json()) as { ok?: boolean; imageBase64?: string; model?: string; error?: string }
@@ -109,6 +121,20 @@ function useInGenerator() {
 
         <div v-if="serverOk === false" class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
           ⚠ AI 服务暂时不可用，请稍后再试。
+        </div>
+
+        <div
+          v-if="isLoggedIn"
+          class="rounded-xl px-3 py-2 text-xs"
+          :class="usage && usage.today >= usage.limit ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'"
+        >
+          🤖 今日已用 <b>{{ usage?.today ?? '-' }}</b> / {{ usage?.limit ?? '-' }} 次
+          <span v-if="usage && usage.today >= usage.limit">（今日额度已用完，明天再来或联系管理员提高上限）</span>
+        </div>
+        <div v-else class="rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-500">
+          👤 当前为游客（不限次数）。
+          <router-link to="/login" class="font-medium text-brand-500 hover:underline">登录</router-link>
+          后可查看用量并跨设备同步。
         </div>
 
         <button class="btn btn-primary w-full" :disabled="generating" @click="generate">

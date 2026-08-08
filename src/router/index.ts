@@ -1,4 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { getToken } from '../utils/api'
+import { authState } from '../composables/useAuth'
 
 const routes = [
   { path: '/', name: 'home', component: () => import('../views/HomeView.vue'), meta: { title: '图纸库' } },
@@ -9,7 +11,11 @@ const routes = [
   { path: '/warehouse', name: 'warehouse', component: () => import('../views/WarehouseView.vue'), meta: { title: '豆仓' } },
   { path: '/mine', name: 'mine', component: () => import('../views/MyView.vue'), meta: { title: '我的' } },
   { path: '/palette', name: 'palette', component: () => import('../views/PaletteView.vue'), meta: { title: '色卡' } },
-  { path: '/share/:token', name: 'share', component: () => import('../views/SharedView.vue'), meta: { title: '共享图纸' } }
+  { path: '/share/:token', name: 'share', component: () => import('../views/SharedView.vue'), meta: { title: '共享图纸' } },
+  { path: '/login', name: 'login', component: () => import('../views/AuthView.vue'), meta: { title: '登录 / 注册', guestOnly: true } },
+  { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心', requiresAuth: true } },
+  { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue'), meta: { title: '后台管理', requiresAuth: true, requiresAdmin: true } },
+  { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 
 const router = createRouter({
@@ -18,6 +24,20 @@ const router = createRouter({
   scrollBehavior() {
     return { top: 0 }
   }
+})
+
+router.beforeEach((to) => {
+  const hasToken = !!getToken()
+  if (to.meta.requiresAuth && !hasToken) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.guestOnly && hasToken) {
+    return { path: '/profile' }
+  }
+  if (to.meta.requiresAdmin && authState.user && authState.user.role !== 'admin') {
+    return { path: '/' }
+  }
+  return true
 })
 
 router.afterEach((to) => {

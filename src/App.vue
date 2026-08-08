@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuth } from './composables/useAuth'
 
 const route = useRoute()
+const auth = useAuth()
+const { isLoggedIn, isAdmin } = auth
 const menuOpen = ref(false)
+const userMenuOpen = ref(false)
 watch(
   () => route.fullPath,
   () => {
     menuOpen.value = false
+    userMenuOpen.value = false
   }
 )
+onMounted(() => {
+  auth.fetchMe()
+})
 
 const navs = [
   { to: '/', label: '图纸库', icon: '🏠' },
@@ -19,6 +27,15 @@ const navs = [
   { to: '/warehouse', label: '豆仓', icon: '📦' },
   { to: '/mine', label: '我的', icon: '🙋' }
 ]
+
+function logout() {
+  auth.logout()
+  userMenuOpen.value = false
+  if (route.path === '/profile' || route.path === '/admin') {
+    window.location.hash = '#/'
+  }
+}
+
 </script>
 
 <template>
@@ -45,6 +62,49 @@ const navs = [
           </router-link>
         </nav>
 
+        <!-- 用户区 -->
+        <div class="relative shrink-0">
+          <template v-if="isLoggedIn">
+            <button
+              class="flex items-center gap-1.5 rounded-xl px-2 py-1.5 text-sm transition hover:bg-stone-100"
+              @click="userMenuOpen = !userMenuOpen"
+            >
+              <span class="grid h-8 w-8 place-items-center rounded-full bg-brand-100 text-sm font-semibold text-brand-600">
+                {{ (auth.state.user?.nickname || '我').slice(0, 1) }}
+              </span>
+              <span class="hidden max-w-[90px] truncate font-medium text-stone-700 sm:block">{{ auth.state.user?.nickname }}</span>
+              <svg class="h-4 w-4 text-stone-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div
+              v-if="userMenuOpen"
+              class="absolute right-0 top-11 z-50 w-44 rounded-xl bg-white p-1.5 shadow-lg ring-1 ring-stone-200"
+              @click.stop
+            >
+              <router-link to="/profile" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-stone-700 hover:bg-brand-50 hover:text-brand-600">
+                👤 个人中心
+              </router-link>
+              <router-link
+                v-if="isAdmin"
+                to="/admin"
+                class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-stone-700 hover:bg-brand-50 hover:text-brand-600"
+              >
+                🛠 后台管理
+              </router-link>
+              <button
+                class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-red-50 hover:text-red-600"
+                @click="logout"
+              >
+                🚪 退出登录
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <router-link to="/login" class="btn btn-primary !px-4 !py-1.5">登录</router-link>
+          </template>
+        </div>
+
         <button class="btn btn-ghost md:hidden" aria-label="菜单" @click="menuOpen = !menuOpen">
           <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -61,6 +121,13 @@ const navs = [
         >
           <span class="text-base leading-none">{{ n.icon }}</span>
           {{ n.label }}
+        </router-link>
+        <router-link
+          :to="isLoggedIn ? '/profile' : '/login'"
+          class="mt-1 flex items-center gap-2 rounded-lg border-t border-stone-100 px-3 py-2.5 text-[15px] font-medium text-stone-700 hover:bg-brand-50 hover:text-brand-600"
+        >
+          <span class="text-base leading-none">👤</span>
+          {{ auth.isLoggedIn ? '个人中心' : '登录 / 注册' }}
         </router-link>
       </div>
     </header>
