@@ -199,7 +199,7 @@ async function clickByText(page, text) {
     await page.goto(BASE + '#/pattern/builtin-heart', { waitUntil: 'networkidle0' })
     await new Promise((r) => setTimeout(r, 500))
     body = await page.evaluate(() => document.body.innerText)
-    console.log(body.includes('已关联豆仓库存') ? 'PASS  图例关联库存' : 'FAIL  图例关联库存')
+    console.log(/库存充足|还缺 \d+ 颗/.test(body) ? 'PASS  图例关联库存' : 'FAIL  图例关联库存')
 
     await page.goto(BASE + '#/editor/builtin-heart', { waitUntil: 'networkidle0' })
     await new Promise((r) => setTimeout(r, 500))
@@ -244,6 +244,10 @@ async function clickByText(page, text) {
         : 'FAIL  撤销/重做（N=' + cellsN + ' painted=' + cellsPainted + ' undo=' + cellsUndo + ' redo=' + cellsRedo + '）'
     )
 
+    // 回到原始状态，避免未保存修改触发离开确认弹窗阻塞导航
+    await clickByText(page, '撤销')
+    await new Promise((r) => setTimeout(r, 300))
+
     await page.goto(BASE + '#/mine', { waitUntil: 'networkidle0' })
     await new Promise((r) => setTimeout(r, 400))
     await page.reload({ waitUntil: 'networkidle0' })
@@ -287,7 +291,12 @@ async function clickByText(page, text) {
     await new Promise((r) => setTimeout(r, 400))
     await page.evaluate(() => {
       const cell = document.querySelector('.grid-cell')
-      if (cell) cell.click()
+      const canvas = document.querySelector('canvas')
+      if (cell) { cell.click(); return }
+      if (canvas) {
+        const r = canvas.getBoundingClientRect()
+        canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }))
+      }
     })
     await new Promise((r) => setTimeout(r, 400))
     const progAfter = await page.evaluate(() => {

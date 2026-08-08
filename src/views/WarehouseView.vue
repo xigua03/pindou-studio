@@ -46,6 +46,34 @@ function clearAll() {
     for (const c of palette.value.colors) store.setInventory(paletteId.value, c.code, 0)
   }
 }
+
+// 批量修改：作用于当前筛选结果
+const batchCount = ref(0)
+const batchMsg = ref('')
+let batchTimer: ReturnType<typeof setTimeout> | undefined
+const filteredColors = computed(() => groups.value.flatMap(([, list]) => list))
+function batchApply(mode: 'set' | 'add' | 'sub' | 'clear') {
+  const list = filteredColors.value
+  if (!list.length) {
+    batchMsg.value = '当前筛选没有颜色'
+    setTimeout(() => (batchMsg.value = ''), 2500)
+    return
+  }
+  if (mode === 'clear') {
+    for (const c of list) store.setInventory(paletteId.value, c.code, 0)
+    batchMsg.value = `已清空 ${list.length} 个颜色`
+  } else if (mode === 'set') {
+    const n = Math.max(0, Math.floor(batchCount.value || 0))
+    for (const c of list) store.setInventory(paletteId.value, c.code, n)
+    batchMsg.value = `已将 ${list.length} 个颜色设为 ${n}`
+  } else {
+    const delta = (mode === 'add' ? 1 : -1) * Math.floor(batchCount.value || 0)
+    for (const c of list) store.addInventory(paletteId.value, c.code, delta)
+    batchMsg.value = `已为 ${list.length} 个颜色${delta >= 0 ? '增加' : '减少'} ${Math.abs(delta)}`
+  }
+  if (batchTimer) clearTimeout(batchTimer)
+  batchTimer = setTimeout(() => (batchMsg.value = ''), 3000)
+}
 </script>
 
 <template>
@@ -72,6 +100,23 @@ function clearAll() {
         只看已登记
       </label>
       <button class="btn btn-danger ml-auto" @click="clearAll">清空当前色卡</button>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="text-sm font-semibold text-stone-700">批量修改</span>
+        <span class="text-xs text-stone-400">作用于当前筛选的 <b class="text-brand-500">{{ filteredColors.length }}</b> 个颜色</span>
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs text-stone-500">数量</span>
+          <input v-model.number="batchCount" type="number" min="0" class="input !w-24 !py-1.5" placeholder="0" />
+        </div>
+        <button class="btn btn-secondary !py-1.5 text-xs" @click="batchApply('set')">设为</button>
+        <button class="btn btn-secondary !py-1.5 text-xs" @click="batchApply('add')">增加</button>
+        <button class="btn btn-secondary !py-1.5 text-xs" @click="batchApply('sub')">减少</button>
+        <button class="btn btn-danger !py-1.5 text-xs" @click="batchApply('clear')">清零</button>
+      </div>
+      <p v-if="batchMsg" class="mt-2 text-xs font-medium text-brand-600">{{ batchMsg }}</p>
+      <p class="mt-1 text-[11px] text-stone-400">例：筛选“只看已登记”后点“清零”；整盒入库时输入数量点“增加”。</p>
     </div>
 
     <div class="space-y-3">

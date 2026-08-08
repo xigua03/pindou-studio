@@ -29,13 +29,27 @@ const rows = computed<Row[]>(() =>
 )
 
 const total = computed(() => rows.value.reduce((s, r) => s + r.count, 0))
+const summary = computed(() => {
+  let need = 0
+  let needColors = 0
+  for (const r of rows.value) {
+    if (r.owned < r.count) {
+      need += r.count - r.owned
+      needColors++
+    }
+  }
+  return { need, needColors }
+})
 </script>
 
 <template>
   <div>
     <div class="mb-2 flex items-center justify-between text-xs text-stone-400">
       <span>共 {{ rows.length }} 种颜色 · {{ total }} 颗豆</span>
-      <span v-if="rows.some((r) => r.status !== 'noData')" class="text-brand-500">已关联豆仓库存</span>
+      <span v-if="summary.need > 0" class="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-500">
+        还缺 {{ summary.need }} 颗（{{ summary.needColors }} 色）
+      </span>
+      <span v-else-if="rows.some((r) => r.status !== 'noData')" class="rounded-full bg-green-50 px-2 py-0.5 font-medium text-green-600">库存充足 ✓</span>
     </div>
     <ul class="divide-y divide-stone-100">
       <li v-for="r in rows" :key="r.code" class="flex items-center gap-3 py-2">
@@ -64,7 +78,7 @@ const total = computed(() => rows.value.reduce((s, r) => s + r.count, 0))
         >
           需购 {{ r.count }} 颗
         </span>
-        <span v-else class="text-xs text-stone-300">未登记</span>
+        <span v-else class="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-500">需购 {{ r.count }} 颗</span>
       </li>
     </ul>
   </div>

@@ -29,6 +29,8 @@ export interface Pattern {
   height: number
   rows: string[][]
   source: 'builtin' | 'generated' | 'edited'
+  /** 来源标签（如 Perler画廊） */
+  sourceLabel?: string
   createdAt: number
 }
 

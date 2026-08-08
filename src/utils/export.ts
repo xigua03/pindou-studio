@@ -23,9 +23,84 @@ export interface RenderOptions {
   codeFontScale?: number
   /** ?????????????? A4 ?????????????? */
   region?: { x: number; y: number; w: number; h: number }
+
+  /** board reference line interval (cells): >0 draws thick red board-boundary lines */
+  boardSize?: number
+  /** show row/column coordinate numbers on the edges */
+  showCoords?: boolean
 }
 
 /** 把图纸渲染到 canvas（返回 canvas 与下载用的 dataURL） */
+
+/** Draw a coordinate frame for a pattern region: reference lines (every 5 cells
+ *  and every boardSize cells) plus row/column numbers along the top and left edges. */
+export function drawCoordFrame(
+  ctx: CanvasRenderingContext2D,
+  pattern: Pattern,
+  cellSize: number,
+  ox: number,
+  oy: number,
+  region: { x: number; y: number; w: number; h: number },
+  opts: { boardSize?: number; minorEvery?: number; strip?: number } = {}
+): void {
+  const { boardSize = 0, minorEvery = 5, strip = cellSize } = opts
+  const { x: rx, y: ry, w: rw, h: rh } = region
+  ctx.save()
+  // minor reference lines every 5 cells (faint red, like perlerbeads)
+  if (minorEvery > 1) {
+    ctx.strokeStyle = 'rgba(224,36,36,0.5)'
+    ctx.lineWidth = 1.3
+    ctx.beginPath()
+    for (let cx = minorEvery; cx < pattern.width; cx += minorEvery) {
+      if (cx <= rx || cx >= rx + rw) continue
+      const px = ox + (cx - rx) * cellSize
+      ctx.moveTo(px, oy)
+      ctx.lineTo(px, oy + rh * cellSize)
+    }
+    for (let cy = minorEvery; cy < pattern.height; cy += minorEvery) {
+      if (cy <= ry || cy >= ry + rh) continue
+      const py = oy + (cy - ry) * cellSize
+      ctx.moveTo(ox, py)
+      ctx.lineTo(ox + rw * cellSize, py)
+    }
+    ctx.stroke()
+  }
+  // major board-boundary lines (thick red)
+  if (boardSize > 1) {
+    ctx.strokeStyle = 'rgba(224,36,36,0.8)'
+    ctx.lineWidth = Math.max(1.5, cellSize * 0.1)
+    ctx.beginPath()
+    for (let bx = boardSize; bx < pattern.width; bx += boardSize) {
+      if (bx <= rx || bx >= rx + rw) continue
+      const px = ox + (bx - rx) * cellSize
+      ctx.moveTo(px, oy)
+      ctx.lineTo(px, oy + rh * cellSize)
+    }
+    for (let by = boardSize; by < pattern.height; by += boardSize) {
+      if (by <= ry || by >= ry + rh) continue
+      const py = oy + (by - ry) * cellSize
+      ctx.moveTo(ox, py)
+      ctx.lineTo(ox + rw * cellSize, py)
+    }
+    ctx.stroke()
+  }
+  // row / column coordinate numbers
+  if (strip > 0) {
+    ctx.font = '600 ' + Math.max(8, Math.round(cellSize * 0.45)) + 'px ui-monospace, "Microsoft YaHei", sans-serif'
+    ctx.fillStyle = '#6b7280'
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'center'
+    for (let cx = 0; cx < rw; cx++) {
+      ctx.fillText(String(rx + cx + 1), ox + cx * cellSize + cellSize / 2, oy - strip / 2)
+    }
+    ctx.textAlign = 'right'
+    for (let cy = 0; cy < rh; cy++) {
+      ctx.fillText(String(ry + cy + 1), ox - 4, oy + cy * cellSize + cellSize / 2)
+    }
+  }
+  ctx.restore()
+}
+
 export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: RenderOptions = {}): HTMLCanvasElement {
   const {
     cellSize = 16,
@@ -34,15 +109,19 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
     background = '#ffffff',
     padding = 0,
     codeFontScale = 1,
-    region
+    region,
+    showCoords = false,
+    boardSize = 0
   } = opts
   const byCode = new Map(palette.colors.map((c) => [c.code, c]))
   const r = region ?? { x: 0, y: 0, w: pattern.width, h: pattern.height }
+  const leftW = showCoords ? cellSize : 0
+  const topH = showCoords ? cellSize : 0
   const innerW = r.w * cellSize
   const innerH = r.h * cellSize
   const canvas = document.createElement('canvas')
-  canvas.width = innerW + padding * 2
-  canvas.height = innerH + padding * 2
+  canvas.width = leftW + innerW + padding * 2
+  canvas.height = topH + innerH + padding * 2
   const ctx = canvas.getContext('2d')!
 
   if (background) {
@@ -56,8 +135,8 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
       const code = row[x] ?? ''
       if (!code || code === '.') continue
       const color = byCode.get(code)
-      const px = padding + (x - r.x) * cellSize
-      const py = padding + (y - r.y) * cellSize
+      const px = padding + leftW + (x - r.x) * cellSize
+      const py = padding + topH + (y - r.y) * cellSize
       if (color) {
         ctx.fillStyle = color.hex
         ctx.fillRect(px, py, cellSize, cellSize)
@@ -78,6 +157,9 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
         ctx.strokeRect(px + 0.25, py + 0.25, cellSize - 0.5, cellSize - 0.5)
       }
     }
+  }
+  if (showCoords) {
+    drawCoordFrame(ctx, pattern, cellSize, padding + leftW, padding + topH, r, { boardSize })
   }
   return canvas
 }
@@ -128,7 +210,9 @@ export function printPattern(pattern: Pattern, palette: BeadPalette, opts: Rende
     showCodes: opts.showCodes ?? true,
     showGrid: true,
     background: '#ffffff',
-    padding: 12
+    padding: 12,
+    showCoords: opts.showCoords ?? false,
+    boardSize: opts.boardSize ?? 0
   })
   const img = canvas.toDataURL('image/png')
   const usage = computeColorUsage(pattern)
@@ -177,6 +261,10 @@ export function printPattern(pattern: Pattern, palette: BeadPalette, opts: Rende
 
 export interface SheetOptions {
   cellSize?: number
+
+  /** show row/column numbers + board reference lines on the pattern */
+  showCoords?: boolean
+  boardSize?: number
 }
 
 /**
@@ -193,7 +281,9 @@ export function renderPatternSheet(pattern: Pattern, palette: BeadPalette, opts:
     showCodes: cell >= 10,
     showGrid: true,
     background: '#ffffff',
-    padding: 6
+    padding: 6,
+    showCoords: opts.showCoords ?? false,
+    boardSize: opts.boardSize ?? 0
   })
 
   const margin = 24
@@ -296,6 +386,10 @@ export interface TiledPrintOptions {
   colsPerPage?: number
   /** 每页纵向格数；不传按 A4 可打印高度自动计算 */
   rowsPerPage?: number
+
+  /** show row/column numbers + board reference lines */
+  showCoords?: boolean
+  boardSize?: number
 }
 
 /**
@@ -326,7 +420,9 @@ export function printPatternTiled(pattern: Pattern, palette: BeadPalette, opts: 
         showGrid: true,
         background: '#ffffff',
         padding: 4,
-        region: { x: x0, y: y0, w, h }
+        region: { x: x0, y: y0, w, h },
+        showCoords: opts.showCoords ?? false,
+        boardSize: opts.boardSize ?? 0
       })
       const img = canvas.toDataURL('image/png')
       const rowLabel = `${y0 + 1}–${y0 + h}`

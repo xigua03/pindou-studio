@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { CropRect } from '../types'
 
 const props = withDefaults(
@@ -16,6 +16,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: CropRect | null): void
+  (e: 'confirm'): void
+  (e: 'cancel'): void
 }>()
 
 const wrap = ref<HTMLElement | null>(null)
@@ -151,6 +153,13 @@ function onUp() {
   drag.value = null
 }
 
+function onConfirm() {
+  emit('confirm')
+}
+
+onMounted(() => window.addEventListener('pointerup', onUp))
+onUnmounted(() => window.removeEventListener('pointerup', onUp))
+
 const rectStyle = computed(() => {
   if (!rect.value) return {}
   const s = scale.value
@@ -211,9 +220,16 @@ function handleStyle(h: (typeof handles)[number]) {
         <button
           type="button"
           class="rounded-md bg-brand-50 px-2 py-1 text-[11px] font-medium text-brand-600 hover:bg-brand-100"
-          @click="emit('update:modelValue', null)"
+          @click="emit('update:modelValue', null); emit('cancel')"
         >
           不裁剪
+        </button>
+        <button
+          type="button"
+          class="rounded-md bg-brand-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-brand-600"
+          @click="onConfirm"
+        >
+          完成
         </button>
       </div>
     </div>
@@ -221,11 +237,14 @@ function handleStyle(h: (typeof handles)[number]) {
     <div
       ref="wrap"
       data-testid="crop-wrap"
-      class="relative select-none rounded-xl bg-stone-100 ring-1 ring-stone-200"
+      tabindex="0"
+      class="relative select-none rounded-xl bg-stone-100 ring-1 ring-stone-200 outline-none focus:ring-2 focus:ring-brand-400"
       :style="{ width: dispW + 'px', height: dispH + 'px' }"
       @pointermove="onMove"
       @pointerup="onUp"
       @pointercancel="onUp"
+      @contextmenu.prevent="onConfirm"
+      @keydown.enter.prevent="onConfirm"
     >
       <img :src="src" draggable="false" class="pointer-events-none block h-full w-full rounded-xl" style="user-select: none" />
 

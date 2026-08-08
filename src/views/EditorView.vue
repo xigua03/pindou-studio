@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import type { Pattern } from '../types'
 import { getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
@@ -14,9 +14,16 @@ const working = ref<Pattern | null>(null)
 const saved = ref(false)
 const cellSize = ref(24)
 const showCodes = ref(true)
+const showCoords = ref(false)
+const boardSize = ref(29)
 const tool = ref<'brush' | 'eraser' | 'pipette'>('brush')
 const selectedColor = ref('')
 const painting = ref(false)
+const gridRef = ref<HTMLElement | null>(null)
+const originalRows = ref<string[][] | null>(null)
+const unsavedModal = ref(false)
+let pendingLeave: string | null = null
+let allowLeave = false
 
 // 撤销 / 重做历史栈（每步保存 rows 快照）
 const history = ref<string[][][]>([])
@@ -74,7 +81,23 @@ const gridStyle = computed(() =>
   working.value ? { gridTemplateColumns: `repeat(${working.value.width}, ${cellSize.value}px)` } : {}
 )
 
+// 坐标/参考线：每 5 格浅红细线，每 boardSize 格深红粗线（对齐详情页底板分割线风格）
+function cellFrameStyle(x: number, y: number): string {
+  const shadows = ['inset 0 0 0 0.5px rgba(0,0,0,0.12)']
+  if (showCoords.value) {
+    if (x > 0 && x % 5 === 0) shadows.push('inset 0.5px 0 0 rgba(224,36,36,0.55)')
+    if (y > 0 && y % 5 === 0) shadows.push('inset 0 0.5px 0 rgba(224,36,36,0.55)')
+    if (x > 0 && x % boardSize.value === 0) shadows.push('inset 1.5px 0 0 rgba(224,36,36,0.85)')
+    if (y > 0 && y % boardSize.value === 0) shadows.push('inset 0 1.5px 0 rgba(224,36,36,0.85)')
+  }
+  return shadows.join(', ')
+}
+
 const tooBig = computed(() => (working.value ? working.value.width * working.value.height > 9000 : false))
+const hasChanges = computed(() => {
+  if (!working.value || !originalRows.value) return false
+  return JSON.stringify(working.value.rows) !== JSON.stringify(originalRows.value)
+})
 
 onMounted(() => {
   const id = String(route.params.id)
@@ -101,17 +124,21 @@ onMounted(() => {
     }
   }
   if (!selectedColor.value && usedColors.value.length) selectedColor.value = usedColors.value[0]
+  originalRows.value = working.value.rows.map((r) => [...r])
   pushHistory() // 记录初始状态，保证第一步操作也能撤销
   window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('beforeunload', onBeforeUnload)
 })
 
 function endStroke() {
   if (painting.value && (tool.value === 'brush' || tool.value === 'eraser')) pushHistory()
   painting.value = false
+  lastCellX = -1
+  lastCellY = -1
 }
 function paintCell(x: number, y: number) {
   if (!working.value) return
@@ -130,26 +157,101 @@ function paintCell(x: number, y: number) {
   }
 }
 
+let lastCellX = -1
+let lastCellY = -1
+
+function paintLine(x0: number, y0: number, x1: number, y1: number) {
+  if (!working.value) return
+  const w = working.value.width
+  const h = working.value.height
+  const dx = Math.abs(x1 - x0)
+  const dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  let x = x0
+  let y = y0
+  for (;;) {
+    if (x >= 0 && y >= 0 && x < w && y < h) paintCell(x, y)
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 > -dy) { err -= dy; x += sx }
+    if (e2 < dx) { err += dx; y += sy }
+  }
+}
+
 function onPointerDown(e: PointerEvent) {
   const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-cell]')
   if (!cell) return
   painting.value = true
   try {
-    cell.setPointerCapture?.(e.pointerId)
+    gridRef.value?.setPointerCapture?.(e.pointerId)
   } catch {
     /* ignore */
   }
   const x = Number(cell.dataset.x)
   const y = Number(cell.dataset.y)
+  lastCellX = x
+  lastCellY = y
   paintCell(x, y)
 }
 
-function onPointerEnter(e: PointerEvent) {
+function onPointerMove(e: PointerEvent) {
   if (!painting.value) return
-  const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-cell]')
-  if (!cell) return
-  paintCell(Number(cell.dataset.x), Number(cell.dataset.y))
+  const g = gridRef.value
+  if (!g || !working.value) return
+  const rect = g.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  const x = Math.floor((e.clientX - rect.left) / cellSize.value)
+  const y = Math.floor((e.clientY - rect.top) / cellSize.value)
+  if (x < 0 || y < 0 || x >= working.value.width || y >= working.value.height) return
+  if (x === lastCellX && y === lastCellY) return
+  if (lastCellX >= 0 && lastCellY >= 0) paintLine(lastCellX, lastCellY, x, y)
+  else paintCell(x, y)
+  lastCellX = x
+  lastCellY = y
 }
+
+function doSaveLeave() {
+  save()
+  allowLeave = true
+  const target = pendingLeave
+  pendingLeave = null
+  unsavedModal.value = false
+  if (target) router.push(target)
+}
+
+function doDiscardLeave() {
+  allowLeave = true
+  const target = pendingLeave
+  pendingLeave = null
+  unsavedModal.value = false
+  if (target) router.push(target)
+}
+
+function cancelLeave() {
+  unsavedModal.value = false
+  pendingLeave = null
+}
+
+onBeforeRouteLeave((to) => {
+  if (allowLeave) {
+    allowLeave = false
+    return true
+  }
+  if (!hasChanges.value) return true
+  pendingLeave = to.fullPath
+  unsavedModal.value = true
+  return false
+})
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (hasChanges.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+window.addEventListener('beforeunload', onBeforeUnload)
 
 function rotate() {
   if (!working.value) return
@@ -187,6 +289,7 @@ function clearAll() {
 function save() {
   if (!working.value) return
   store.savePattern(working.value)
+  originalRows.value = working.value.rows.map((r) => [...r])
   saved.value = true
   setTimeout(() => (saved.value = false), 1500)
 }
@@ -263,6 +366,17 @@ function save() {
           <label class="flex cursor-pointer items-center gap-2">
             <input v-model="showCodes" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 显示色号
           </label>
+          <label class="flex cursor-pointer items-center gap-2">
+            <input v-model="showCoords" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 坐标/参考线
+          </label>
+          <label v-if="showCoords" class="flex items-center gap-2">
+            <span>底板</span>
+            <select v-model.number="boardSize" class="input !w-20 !py-0.5 text-xs">
+              <option :value="29">29×29</option>
+              <option :value="50">50×50</option>
+              <option :value="104">104×104</option>
+            </select>
+          </label>
           <label class="flex items-center gap-2">
             <span>格子大小</span>
             <input v-model.number="cellSize" type="range" min="12" max="40" class="w-28 accent-brand-500" />
@@ -279,33 +393,58 @@ function save() {
         <div
           v-else
           class="select-none overflow-auto rounded-xl bg-stone-50 p-4"
-          style="max-height: 72vh"
+          style="max-height: 72vh; touch-action: manipulation; -webkit-tap-highlight-color: transparent;"
           @pointerdown="onPointerDown"
-          @pointerenter="onPointerEnter"
+          @pointermove="onPointerMove"
           @pointerup="endStroke"
+          @pointercancel="endStroke"
           @pointerleave="endStroke"
+          @contextmenu.prevent
         >
-          <div class="inline-grid touch-none" :style="gridStyle">
-            <div
-              v-for="(_, idx) in working.width * working.height"
-              :key="idx"
-              data-cell
-              :data-x="idx % working.width"
-              :data-y="Math.floor(idx / working.width)"
-              class="grid-cell"
-              :style="{
-                width: cellSize + 'px',
-                height: cellSize + 'px',
-                background: (() => { const code = working.rows[Math.floor(idx / working.width)]?.[idx % working.width]; return code && code !== '.' ? (colorMap.get(code)?.hex ?? '#fff') : 'rgba(0,0,0,0.04)' })(),
-                boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.12)'
-              }"
-            >
-              <span
-                v-if="showCodes"
-                :style="{ fontSize: Math.max(6, cellSize * 0.32) + 'px' }"
-              >
-                {{ (() => { const code = working.rows[Math.floor(idx / working.width)]?.[idx % working.width]; return code && code !== '.' ? code : '' })() }}
-              </span>
+          <div class="inline-block align-top">
+            <!-- 顶部坐标数字 -->
+            <div v-if="showCoords" class="flex">
+              <div :style="{ width: cellSize + 'px', height: cellSize + 'px' }"></div>
+              <div
+                v-for="x in working.width"
+                :key="'cx' + x"
+                class="grid shrink-0 place-items-center text-stone-400"
+                :style="{ width: cellSize + 'px', height: cellSize + 'px', fontSize: Math.max(6, cellSize * 0.34) + 'px' }"
+              >{{ x }}</div>
+            </div>
+            <div class="flex">
+              <!-- 左侧坐标数字 -->
+              <div v-if="showCoords" class="flex flex-col">
+                <div
+                  v-for="y in working.height"
+                  :key="'cy' + y"
+                  class="grid shrink-0 place-items-center text-stone-400"
+                  :style="{ width: cellSize + 'px', height: cellSize + 'px', fontSize: Math.max(6, cellSize * 0.34) + 'px' }"
+                >{{ y }}</div>
+              </div>
+              <div ref="gridRef" class="inline-grid touch-none" :style="gridStyle">
+                <div
+                  v-for="(_, idx) in working.width * working.height"
+                  :key="idx"
+                  data-cell
+                  :data-x="idx % working.width"
+                  :data-y="Math.floor(idx / working.width)"
+                  class="grid-cell"
+                  :style="{
+                    width: cellSize + 'px',
+                    height: cellSize + 'px',
+                    background: (() => { const code = working.rows[Math.floor(idx / working.width)]?.[idx % working.width]; return code && code !== '.' ? (colorMap.get(code)?.hex ?? '#fff') : 'rgba(0,0,0,0.04)' })(),
+                    boxShadow: cellFrameStyle(idx % working.width, Math.floor(idx / working.width))
+                  }"
+                >
+                  <span
+                    v-if="showCodes"
+                    :style="{ fontSize: Math.max(6, cellSize * 0.32) + 'px' }"
+                  >
+                    {{ (() => { const code = working.rows[Math.floor(idx / working.width)]?.[idx % working.width]; return code && code !== '.' ? code : '' })() }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -318,16 +457,16 @@ function save() {
     <p class="text-lg font-medium text-stone-600">图纸不存在</p>
     <router-link to="/" class="btn btn-primary mt-4">返回图纸库</router-link>
   </div>
+  <!-- unsaved changes modal -->
+  <div v-if="unsavedModal" class="fixed inset-0 z-50 grid place-items-center bg-black/40">
+    <div class="w-[340px] rounded-2xl bg-white p-5 shadow-xl">
+      <h3 class="text-base font-semibold text-stone-800">有未保存的修改</h3>
+      <p class="mt-1.5 text-sm leading-5 text-stone-500">当前图纸有改动还没保存，要保存后再离开吗？</p>
+      <div class="mt-5 flex flex-col gap-2">
+        <button class="btn btn-primary" @click="doSaveLeave">保存并离开</button>
+        <button class="btn btn-secondary" @click="doDiscardLeave">不保存，直接离开</button>
+        <button class="rounded-lg px-3 py-2 text-sm font-medium text-stone-500 hover:bg-stone-100" @click="cancelLeave">取消</button>
+      </div>
+    </div>
+  </div>
 </template>
-
-<style scoped>
-.grid-cell {
-  display: grid;
-  place-items: center;
-  color: rgba(0, 0, 0, 0.65);
-  font-family: ui-monospace, monospace;
-  font-weight: 600;
-  cursor: crosshair;
-  user-select: none;
-}
-</style>

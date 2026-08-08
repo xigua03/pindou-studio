@@ -6,3 +6,6 @@ dist/
 Thumbs.db
 .env
 screenshots/
+
+# 临时分析/调试脚本（不入库）
+scripts/_*

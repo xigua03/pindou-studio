@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -34,7 +34,12 @@ const removeBg = ref(true) // 去除背景留空（默认开）
 const bgThreshold = ref(18) // 背景阈值（CIEDE2000）
 const bgColor = ref('#FFFFFF') // 背景色
 const autoCrop = ref(true) // 自动裁剪空白边距
+const showMargin = ref(true) // 底板外围留空显示（预览/下载按底板补齐，空位显示为空格子）
 const sharpen = ref(true) // 边缘锐化
+// 图片细节丰富度：缩到 128 宽后统计的独特颜色数，越高越复杂（照片数百上千，卡通几十）
+const detailScore = ref(0)
+const suggestedWidth = ref(0)
+const detailNote = ref('')
 // 上传前裁剪
 const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
@@ -44,6 +49,8 @@ const contrast = ref(10)
 const maxColors = ref(32)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
 const outline = ref(false)
+const protectDark = ref(true) // keep thin dark lines (whiskers/outlines), default on// 去杂点：清理孤立的单色噪点，让画面更干净
+const denoise = ref(true)
 // 仅用手头颜色（豆仓）
 const onlyOwnedColors = ref(false)
 // 底板尺寸（板数规划）
@@ -56,6 +63,7 @@ watch(boardSize, (b) => {
   if (alignBoard.value && width.value > 0 && b > 0) {
     width.value = Math.max(1, Math.round(width.value / b)) * b
   }
+  computeSuggestion()
 })
 // 颜色优化
 const mergeThreshold = ref(0)
@@ -104,9 +112,34 @@ const outputSize = computed(() => {
 })
 
 /** 重映射后的展示图纸（实时预览，不直接改 result） */
+function padToBoard(rows: string[][], b: number): string[][] {
+  const w = rows[0]?.length ?? 0
+  const h = rows.length
+  if (b <= 1) return rows
+  const tw = Math.ceil(w / b) * b
+  const th = Math.ceil(h / b) * b
+  if (tw === w && th === h) return rows
+  const out: string[][] = []
+  for (let y = 0; y < th; y++) {
+    const row: string[] = []
+    const src = rows[y]
+    for (let x = 0; x < tw; x++) row.push(src && x < w ? src[x] : '.')
+    out.push(row)
+  }
+  return out
+}
 const displayPattern = computed(() => {
   if (!result.value) return null
-  return { ...result.value, rows: applyRemap(result.value.rows, remapMap.value) }
+  let rows = result.value.rows
+  if (showMargin.value) rows = padToBoard(rows, boardSize.value)
+  return { ...result.value, rows: applyRemap(rows, remapMap.value), width: rows[0]?.length ?? 0, height: rows.length }
+})
+const marginInfo = computed(() => {
+  if (!result.value || !showMargin.value) return null
+  const b = boardSize.value
+  const tw = Math.ceil(result.value.width / b) * b
+  const th = Math.ceil(result.value.height / b) * b
+  return { tw, th, right: tw - result.value.width, bottom: th - result.value.height }
 })
 const usage = computed(() => (displayPattern.value ? computeColorUsage(displayPattern.value) : []))
 const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
@@ -181,6 +214,57 @@ function saveRemap() {
   setTimeout(() => (mergeMsg.value = ''), 3000)
 }
 
+// 细节丰富度估算：将图片缩到 128 宽后统计“4bit/通道”去重后的颜色数。
+// 照片/人像等连续色调图像颜色数很高（数百~上千），纯色卡通则很少（几十），据此判断是否建议加大板数。
+function estimateDetail(el: HTMLImageElement, src?: { x: number; y: number; w: number; h: number } | null): number {
+  const S = 128
+  const canvas = document.createElement('canvas')
+  const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
+  const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
+  const sw0 = src && src.w > 0 && src.h > 0 ? src.w : el.naturalWidth
+  const sh0 = src && src.w > 0 && src.h > 0 ? src.h : el.naturalHeight
+  const w = S
+  const h = Math.max(2, Math.round((S * sh0) / sw0))
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return 0
+  ctx.drawImage(el, sxx, syy, sw0, sh0, 0, 0, w, h)
+  const data = ctx.getImageData(0, 0, w, h).data
+  const shift = 4
+  const cols = new Set<number>()
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4
+    cols.add(((data[o] >> shift) << 8) | ((data[o + 1] >> shift) << 4) | (data[o + 2] >> shift))
+  }
+  return cols.size
+}
+
+function computeSuggestion() {
+  if (!image.value) {
+    suggestedWidth.value = 0
+    return
+  }
+  const b = boardSize.value
+  let base = Math.round(image.value.w / 3)
+  base = Math.min(base, b * 4)
+  base = Math.max(base, b)
+  const maxW = alignBoard.value ? Math.max(b, Math.floor(200 / b) * b) : 200
+  base = Math.min(base, maxW)
+  if (alignBoard.value) base = Math.round(base / b) * b
+  base = Math.min(base, maxW)
+  suggestedWidth.value = base
+}
+
+const isComplex = computed(() => detailScore.value >= 200)
+
+function applySuggestion() {
+  if (!image.value || suggestedWidth.value <= 0) return
+  width.value = suggestedWidth.value
+  detailNote.value = ''
+  generate()
+}
+
 async function onFile(file: File | undefined) {
   error.value = ''
   if (!file) return
@@ -196,9 +280,21 @@ async function onFile(file: File | undefined) {
     resultName.value = image.value.name || '我的拼豆图纸'
     // 自动检测背景色（四角中位色）
     bgColor.value = rgbTripleToHex(detectBackgroundColor(el))
-    // 默认宽度按图片尺寸自适应（约 1/4 宽，48-110 之间）
-    width.value = Math.max(48, Math.min(110, Math.round(el.naturalWidth / 4)))
+    // 默认宽度按图片尺寸自适应（约 1/4 宽，48-110 之间）；先估算细节复杂度
+    const rawW = Math.max(48, Math.min(110, Math.round(el.naturalWidth / 4)))
+    detailScore.value = estimateDetail(el)
+    // 默认：简单图 2 板起步（约 58 豆宽，细节与工作量平衡），细节复杂的图最多给 4 板
+    let boards = Math.max(1, Math.round(rawW / boardSize.value))
+    if (detailScore.value < 200) boards = Math.min(boards, 2)
+    width.value = alignBoard.value ? Math.max(boardSize.value, boards * boardSize.value) : rawW
     result.value = null
+    computeSuggestion()
+    if (isComplex.value && suggestedWidth.value > width.value) {
+      width.value = suggestedWidth.value
+      detailNote.value = '自动按图片细节建议了 ' + Math.round(suggestedWidth.value / boardSize.value) + ' 板宽度，保留更多细节（可手动调小）。'
+    } else {
+      detailNote.value = ''
+    }
   } catch {
     error.value = '图片加载失败，请换一张试试'
   }
@@ -225,7 +321,8 @@ async function generate() {
   try {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
-    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect)
+    if (srcRect) detailScore.value = estimateDetail(image.value.el, srcRect)
+    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0)
     // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
     const exclude =
       onlyOwnedColors.value && ownedColorCount.value > 0
@@ -257,6 +354,11 @@ async function generate() {
       finalRows = limitColorCount(finalRows, palette.value, maxColors.value).rows
     }
 
+    // 去杂点：删除孤立的单色噪点，让照片类图纸更干净（对卡通细线无影响）
+    if (denoise.value) {
+      finalRows = removeSpeckles(finalRows, 3)
+    }
+
     // 深色描边：外边缘统一加深色轮廓，轮廓更粗更完整
     if (outline.value) {
       finalRows = applyOutline(finalRows, palette.value)
@@ -275,6 +377,8 @@ async function generate() {
       createdAt: Date.now()
     }
     result.value = pat
+    // 预览格子自适应：大图默认用较小格子，避免一拖就变得很大
+    previewCell.value = Math.max(6, Math.min(16, Math.floor(1000 / (outW + 1))))
     // 内容相同则复用已有图纸的 id（不新增重复）
     pat.id = store.savePattern(pat)
   } catch {
@@ -299,7 +403,9 @@ function downloadPNG(withCodes: boolean) {
     showCodes: withCodes,
     showGrid: true,
     background: '#ffffff',
-    padding: 8
+    padding: 8,
+    showCoords: true,
+    boardSize: boardSize.value
   })
   downloadCanvas(canvas, `${safeFileName(pat.name)}${withCodes ? '-色号版' : ''}.png`)
 }
@@ -324,14 +430,14 @@ function edit() {
 function downloadSheet() {
   const pat = displayPattern.value
   if (!pat) return
-  const canvas = renderPatternSheet(pat, palette.value)
+  const canvas = renderPatternSheet(pat, palette.value, { showCoords: true, boardSize: boardSize.value })
   downloadCanvas(canvas, `${safeFileName(pat.name)}-图纸+色号统计.png`)
 }
 
 function printA4() {
   const pat = displayPattern.value
   if (!pat) return
-  printPatternTiled(pat, palette.value, { cellSize: 14 })
+  printPatternTiled(pat, palette.value, { cellSize: 14, showCoords: true, boardSize: boardSize.value })
 }
 </script>
 
@@ -378,7 +484,25 @@ function printA4() {
             <input v-model="cropEnabled" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" @change="onCropToggle" /> 裁剪图片（生成前）
           </label>
           <div v-if="cropEnabled" class="rounded-xl bg-stone-50 p-3">
-            <ImageCropper v-model="cropRect" :src="image.el.src" :image-w="image.w" :image-h="image.h" />
+            <ImageCropper
+              v-model="cropRect"
+              :src="image.el.src"
+              :image-w="image.w"
+              :image-h="image.h"
+              @confirm="cropEnabled = false"
+              @cancel="cropEnabled = false; cropRect = null"
+            />
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <span class="text-[11px] text-stone-400">拖动选区移动，拖动四角/四边缩放；回车或右键完成裁剪</span>
+              <div class="flex gap-2">
+                <button type="button" class="rounded-md bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-200" @click="cropEnabled = false; cropRect = null">
+                  取消裁剪
+                </button>
+                <button type="button" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" @click="cropEnabled = false">
+                  完成裁剪
+                </button>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -407,6 +531,14 @@ function printA4() {
               :step="alignBoard ? boardSize : 1"
               class="w-full accent-brand-500"
             />
+            <div v-if="detailNote" class="mt-2 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-[11px] leading-4 text-brand-700">
+              {{ detailNote }}
+              <button class="ml-1 font-medium text-brand-600 hover:underline" @click="detailNote = ''">知道了</button>
+            </div>
+            <div v-if="image && isComplex && suggestedWidth > outputSize.w" class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-4 text-amber-700">
+              这张图细节较多，当前宽度 {{ outputSize.w }} 豆可能偏糊，建议加大到 {{ suggestedWidth }} 豆宽（约 {{ Math.round(suggestedWidth / boardSize) }} 板）更精细。
+              <button class="ml-1 font-medium text-amber-700 underline" @click="applySuggestion">一键加大并生成</button>
+            </div>
             <div class="mt-1 flex justify-between text-[10px] text-stone-300">
               <span>{{ alignBoard ? '1 板' : '16' }}</span>
               <span>{{ alignBoard ? Math.max(boardSize, Math.floor(200 / boardSize) * boardSize) + ' 豆' : '200' }}</span>
@@ -488,6 +620,14 @@ function printA4() {
               <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
                 <input v-model="outline" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
                 深色描边（勾出轮廓）
+              </label>
+              <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+                <input v-model="protectDark" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+                保留细线细节（胡须/轮廓）
+              </label>
+              <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+                <input v-model="denoise" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+                去杂点（清理孤立噪点）
               </label>
             </div>
             <div>
@@ -574,15 +714,26 @@ function printA4() {
           <span v-if="boardInfo" class="rounded-full bg-sky-50 px-2 py-0.5 text-sky-600">
             📦 需 {{ boardInfo.total }} 块 {{ boardInfo.b }}×{{ boardInfo.b }} 板（{{ boardInfo.bx }}×{{ boardInfo.by }} 排布）
           </span>
+          <span v-if="marginInfo" class="rounded-full bg-stone-100 px-2 py-0.5 text-stone-500">
+            底板 {{ marginInfo.tw }}×{{ marginInfo.th }} · 外围留空：右 {{ marginInfo.right }} · 下 {{ marginInfo.bottom }}
+          </span>
+        </div>
+
+                <div v-if="isComplex && suggestedWidth > result.width" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+          当前输出仅 {{ result.width }} 豆宽，细节偏少。加大到 {{ suggestedWidth }} 豆宽（约 {{ Math.round(suggestedWidth / boardSize) }} 板）能显著提升精细度，人物五官更清晰。
+          <button class="ml-1 font-medium text-amber-700 underline" @click="applySuggestion">加大并重新生成</button>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">
           <label class="flex cursor-pointer items-center gap-1.5 font-medium">
             <input v-model="showCodes" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 显示色号
           </label>
+          <label class="flex cursor-pointer items-center gap-1.5 font-medium" title="把图纸按底板补齐，外围空位显示为空格子，方便数出要空几格">
+            <input v-model="showMargin" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 底板外围留空
+          </label>
           <span class="text-stone-300">|</span>
           <span>格子大小</span>
-          <input v-model.number="previewCell" type="range" min="4" max="24" step="1" class="w-32 accent-brand-500" />
+          <input v-model.number="previewCell" type="range" min="4" max="18" step="1" class="w-40 accent-brand-500" />
           <span class="w-9 text-right font-mono">{{ previewCell }}px</span>
           <span v-if="result.width * previewCell > 900" class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-600">
             图纸较宽，可在下方预览区横向滚动查看
@@ -595,6 +746,8 @@ function printA4() {
             :palette="palette"
             :cell-size="previewCell"
             :show-codes="showCodes"
+            show-coords
+            :board-size="boardSize"
             force-canvas
           />
         </div>

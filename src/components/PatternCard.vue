@@ -30,6 +30,7 @@ const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
         <span class="shrink-0 text-xs text-stone-400">{{ pattern.width }}×{{ pattern.height }}</span>
       </div>
       <p class="mt-1 text-xs text-stone-400">{{ usage.length }} 种颜色 · 共 {{ totalBeads }} 颗豆</p>
+      <p v-if="pattern.sourceLabel" class="mt-1 text-[11px] text-brand-400">来源：{{ pattern.sourceLabel }}</p>
       <div class="mt-2 flex flex-wrap gap-1">
         <span
           v-for="t in pattern.tags.slice(0, 3)"

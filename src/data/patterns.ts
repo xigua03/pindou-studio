@@ -6,6 +6,7 @@ interface RawPattern {
   name: string
   description?: string
   tags: string[]
+  sourceLabel?: string
   paletteId: string
   legend: Record<string, string>
   rows: string[]
@@ -26,6 +27,7 @@ function convert(raw: RawPattern): Pattern {
     height,
     rows,
     source: 'builtin',
+    sourceLabel: raw.sourceLabel,
     createdAt: 0
   }
 }
@@ -35,5 +37,11 @@ export const BUILTIN_PATTERNS: Pattern[] = (raw as unknown as RawPattern[]).map(
 export const BUILTIN_TAGS: string[] = (() => {
   const set = new Set<string>()
   for (const p of BUILTIN_PATTERNS) for (const t of p.tags) set.add(t)
+  return [...set]
+})()
+
+export const BUILTIN_SOURCES: string[] = (() => {
+  const set = new Set<string>()
+  for (const p of BUILTIN_PATTERNS) if (p.sourceLabel) set.add(p.sourceLabel)
   return [...set]
 })()

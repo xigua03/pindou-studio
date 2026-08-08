@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { BUILTIN_PATTERNS, BUILTIN_TAGS } from '../data/patterns'
+import { BUILTIN_PATTERNS, BUILTIN_TAGS, BUILTIN_SOURCES } from '../data/patterns'
 import { PALETTES, getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
 import PatternCard from '../components/PatternCard.vue'
@@ -8,12 +8,15 @@ import PatternCard from '../components/PatternCard.vue'
 const store = useStore()
 const keyword = ref('')
 const activeTag = ref('全部')
+const activeSource = ref('全部')
 
 const tags = computed(() => ['全部', ...BUILTIN_TAGS])
+const sources = computed(() => ['全部', ...BUILTIN_SOURCES])
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return BUILTIN_PATTERNS.filter((p) => {
+    if (activeSource.value !== '全部' && (p.sourceLabel ?? '内置') !== activeSource.value) return false
     const matchTag = activeTag.value === '全部' || p.tags.includes(activeTag.value)
     if (!matchTag) return false
     if (!kw) return true
@@ -81,7 +84,21 @@ const favCount = computed(() => store.state.favorites.length)
 
     <!-- Gallery -->
     <section>
-      <div class="mb-3 flex flex-wrap gap-2">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <span class="mr-1 text-xs font-medium text-stone-400">来源</span>
+        <button
+          v-for="sc in sources"
+          :key="'src-'+sc"
+          class="chip"
+          :class="activeSource === sc ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
+          @click="activeSource = sc"
+        >
+          {{ sc }}
+        </button>
+      </div>
+
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <span class="mr-1 text-xs font-medium text-stone-400">分类</span>
         <button
           v-for="t in tags"
           :key="t"

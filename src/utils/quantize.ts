@@ -345,49 +345,101 @@ export function imageToGridColors(
   saturate = 1,
   sharpen = 0,
   contrast = 0,
-  src?: { x: number; y: number; w: number; h: number } | null
+  src?: { x: number; y: number; w: number; h: number } | null,
+  protectDark = 0.8
 ): Uint8ClampedArray {
-  const sw = Math.max(1, width * supersample)
-  const sh = Math.max(1, height * supersample)
+  // Source region (in image coordinates). When nothing is cropped we use the full image.
+  const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
+  const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
+  const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
+  const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
+
+  // Sampling resolution: must stay high enough that thin dark lines (whiskers,
+  // outlines, pupils) are at least ~1 sample thick after the initial resize.
+  // If we only draw at width*ss the lines get averaged away before the per-cell
+  // step below, so we never fall below min(natural, SAMPLE_CAP).
+  const naturalMax = Math.max(sw0, sh0)
+  const SAMPLE_CAP = 1200
+  const sw = Math.max(1, Math.max(width * supersample, Math.min(naturalMax, SAMPLE_CAP)))
+  const sh = Math.max(1, Math.round((sw * sh0) / sw0))
+
   const canvas = document.createElement('canvas')
   canvas.width = sw
   canvas.height = sh
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  if (src && src.w > 0 && src.h > 0) {
-    ctx.drawImage(img, src.x, src.y, src.w, src.h, 0, 0, sw, sh)
-  } else {
-    ctx.drawImage(img, 0, 0, sw, sh)
-  }
+  ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, sw, sh)
   const data = ctx.getImageData(0, 0, sw, sh).data
   if (sharpen > 0) unsharp(data, sw, sh, sharpen)
+
   const out = new Uint8ClampedArray(width * height * 4)
-  const n = supersample * supersample
+  const fx = sw / width
+  const fy = sh / height
+  const DARK_LUM = 100 // a pixel this dark can be part of a thin dark line
   for (let y = 0; y < height; y++) {
+    const y0 = Math.floor(y * fy)
+    const y1 = Math.max(y0 + 1, Math.floor((y + 1) * fy))
     for (let x = 0; x < width; x++) {
+      const x0 = Math.floor(x * fx)
+      const x1 = Math.max(x0 + 1, Math.floor((x + 1) * fx))
       let r = 0
       let g = 0
       let b = 0
-      for (let sy = 0; sy < supersample; sy++) {
-        for (let sx = 0; sx < supersample; sx++) {
-          const i = ((y * supersample + sy) * sw + x * supersample + sx) * 4
+      let n = 0
+      let minR = 255
+      let minG = 255
+      let minB = 255
+      let minLum = 255
+      let darkCount = 0
+      for (let py = y0; py < y1; py++) {
+        const rowBase = py * sw
+        for (let px = x0; px < x1; px++) {
+          const i = (rowBase + px) * 4
           const a = data[i + 3] / 255
-          r += data[i] * a + 255 * (1 - a)
-          g += data[i + 1] * a + 255 * (1 - a)
-          b += data[i + 2] * a + 255 * (1 - a)
+          const rr = data[i] * a + 255 * (1 - a)
+          const gg = data[i + 1] * a + 255 * (1 - a)
+          const bb = data[i + 2] * a + 255 * (1 - a)
+          r += rr
+          g += gg
+          b += bb
+          n++
+          const lum = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb
+          if (lum < minLum) {
+            minLum = lum
+            minR = rr
+            minG = gg
+            minB = bb
+          }
+          if (lum < DARK_LUM) darkCount++
         }
       }
       r /= n
       g /= n
       b /= n
+      // Preserve thin dark details: when a cell contains a clearly darker
+      // region than its average (a thin line crossing the cell), pull the cell
+      // toward the darkest pixel so whiskers / outlines survive downscaling.
+      if (protectDark > 0 && darkCount > 0) {
+        const meanLum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        const gap = meanLum - minLum
+        if (gap > 40 && minLum < DARK_LUM) {
+          const coverage = Math.min(1, darkCount / n / 0.12)
+          const strength = protectDark * coverage * Math.min(1, gap / 90)
+          if (strength > 0.02) {
+            r = r * (1 - strength) + minR * strength
+            g = g * (1 - strength) + minG * strength
+            b = b * (1 - strength) + minB * strength
+          }
+        }
+      }
       if (saturate !== 1) {
         const [sr, sg, sb] = boostSaturation(r, g, b, saturate)
         r = sr
         g = sg
         b = sb
       }
-      // 对比度：以 128 为中点拉伸/压缩
+      // contrast: stretch around 128
       if (contrast !== 0) {
         const f = 1 + contrast / 100
         r = (r - 128) * f + 128
@@ -403,6 +455,7 @@ export function imageToGridColors(
   }
   return out
 }
+
 
 /**
  * Auto-detect background color by sampling the four corners of a downscaled copy
@@ -786,6 +839,82 @@ export function applyOutline(rows: string[][], palette: BeadPalette): string[][]
         (rows[y - 1]?.[x] ?? '.') === '.' ||
         (rows[y + 1]?.[x] ?? '.') === '.'
       if (isEdge) out[y][x] = darkest.code
+    }
+  }
+  return out
+}
+
+/**
+ * 去杂点：把 8 连通的孤立小色块（噪声）替换成周围出现最多的颜色。
+ * 卡通胡须/轮廓是较长的连通区域，不会被误删。
+ */
+export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
+  const h = rows.length
+  if (h === 0) return rows
+  const w = rows[0].length
+  if (w === 0) return rows
+  const out = rows.map((r) => [...r])
+  const visited = new Uint8Array(w * h)
+  const stack: number[] = []
+  const cluster: number[] = []
+  const inside = (nx: number, ny: number) => nx >= 0 && ny >= 0 && nx < w && ny < h
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x
+      if (visited[idx]) continue
+      const code = rows[y][x]
+      if (!code || code === '.') {
+        visited[idx] = 1
+        continue
+      }
+      visited[idx] = 1
+      stack.length = 0
+      cluster.length = 0
+      stack.push(idx)
+      while (stack.length > 0) {
+        const i = stack.pop()!
+        cluster.push(i)
+        const cx = i % w
+        const cy = (i / w) | 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue
+            const nx = cx + dx
+            const ny = cy + dy
+            if (!inside(nx, ny)) continue
+            const j = ny * w + nx
+            if (!visited[j] && rows[ny][nx] === code) {
+              visited[j] = 1
+              stack.push(j)
+            }
+          }
+        }
+      }
+      if (cluster.length < minCluster) {
+        for (const i of cluster) {
+          const cx = i % w
+          const cy = (i / w) | 0
+          const votes = new Map<string, number>()
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = cx + dx
+              const ny = cy + dy
+              if (!inside(nx, ny)) continue
+              const nc = rows[ny][nx]
+              if (!nc || nc === '.' || nc === code) continue
+              votes.set(nc, (votes.get(nc) || 0) + 1)
+            }
+          }
+          let best = ''
+          let bestN = 0
+          for (const [c, n] of votes) if (n > bestN) {
+            bestN = n
+            best = c
+          }
+          if (best) out[cy][cx] = best
+        }
+      }
     }
   }
   return out

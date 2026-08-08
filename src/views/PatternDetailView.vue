@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Pattern } from '../types'
 import { getPalette, PALETTES, paletteGroups } from '../data/palettes'
@@ -33,6 +33,8 @@ const palette = computed(() => (pattern.value ? getPalette(pattern.value.palette
 const showCodes = ref(true)
 const showGrid = ref(true)
 const cellSize = ref(22)
+const fitWidth = ref(true)
+const fittedCell = ref(14)
 const copied = ref(false)
 
 // 拼豆进度追踪
@@ -45,6 +47,19 @@ const convertMsg = ref('')
 // 底板规划
 const boardSize = ref(29)
 
+const gridWrap = ref<HTMLElement | null>(null)
+let fitObserver: ResizeObserver | undefined
+function updateFit() {
+  const el = gridWrap.value
+  const p = pattern.value
+  if (!el || !p) return
+  const avail = Math.max(120, el.clientWidth - 24)
+  fittedCell.value = Math.max(6, Math.min(28, Math.floor(avail / (p.width + 1))))
+}
+function useManualCell() {
+  fitWidth.value = false
+  updateFit()
+}
 const usage = computed(() => (pattern.value ? computeColorUsage(pattern.value) : []))
 const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
 const isFav = computed(() => (pattern.value ? store.isFavorite(pattern.value.id) : false))
@@ -71,7 +86,11 @@ onMounted(() => {
   const raw = loadJSON<string[]>(`progress_${pattern.value.id}`, [])
   progressSet.value = new Set(raw)
   convertPaletteId.value = pattern.value.paletteId
+  updateFit()
+  fitObserver = new ResizeObserver(updateFit)
+  if (gridWrap.value) fitObserver.observe(gridWrap.value)
 })
+onUnmounted(() => fitObserver?.disconnect())
 
 watch(
   () => pattern.value?.id,
@@ -164,7 +183,9 @@ function downloadPNG(withCodes: boolean) {
     showCodes: withCodes,
     showGrid: true,
     background: '#ffffff',
-    padding: 8
+    padding: 8,
+    showCoords: true,
+    boardSize: boardSize.value
   })
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}${withCodes ? '-色号版' : ''}.png`)
 }
@@ -180,17 +201,17 @@ function exportCSV() {
 
 function doPrint() {
   if (!pattern.value || !palette.value) return
-  printPattern(pattern.value, palette.value, { showCodes: true })
+  printPattern(pattern.value, palette.value, { showCodes: true, showCoords: true, boardSize: boardSize.value })
 }
 
 function printA4() {
   if (!pattern.value || !palette.value) return
-  printPatternTiled(pattern.value, palette.value, { cellSize: 14 })
+  printPatternTiled(pattern.value, palette.value, { cellSize: 14, showCoords: true, boardSize: boardSize.value })
 }
 
 function downloadSheet() {
   if (!pattern.value || !palette.value) return
-  const canvas = renderPatternSheet(pattern.value, palette.value)
+  const canvas = renderPatternSheet(pattern.value, palette.value, { showCoords: true, boardSize: boardSize.value })
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-图纸+色号统计.png`)
 }
 
@@ -260,7 +281,8 @@ function remove() {
         <button class="btn btn-secondary" @click="copyGrid">{{ copied ? '✓ 已复制' : '⧉ 复制色号' }}</button>
         <button class="btn btn-secondary" @click="downloadPNG(false)">⬇ 下载图</button>
         <button class="btn btn-secondary" @click="downloadPNG(true)">⬇ 色号版</button>
-        <button class="btn btn-secondary" @click="exportCSV">⇩ CSV</button>`n        <button class="btn btn-secondary" @click="downloadSheet">🖨 图纸+色号统计</button>
+        <button class="btn btn-secondary" @click="exportCSV">⇩ CSV</button>
+        <button class="btn btn-secondary" @click="downloadSheet">🖨 图纸+色号统计</button>
         <button class="btn btn-secondary" @click="doPrint">🖨 打印</button>
         <button class="btn btn-secondary" @click="printA4">🖨 A4 分区打印</button>
         <button class="btn btn-secondary" @click="openShoppingList">🛒 购物清单</button>
@@ -277,7 +299,7 @@ function remove() {
 
     <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
       <!-- 图纸 -->
-      <section class="card p-4 sm:p-6">
+      <section class="card min-w-0 p-4 sm:p-6">
         <div v-if="showConvert" class="no-print mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">
           <span>🔁 转换为其他品牌色卡（按颜色最近匹配，生成新图纸保存）：</span>
           <select v-model="convertPaletteId" class="input !w-56 !py-1 text-xs">
@@ -307,6 +329,9 @@ function remove() {
             <input v-model="showGrid" type="checkbox" class="h-4 w-4 accent-brand-500" />
             显示网格
           </label>
+          <label class="flex cursor-pointer items-center gap-2 text-sm text-stone-600" title="图纸自动适配屏幕宽度，避免格子过大需要来回拖动">
+            <input v-model="fitWidth" type="checkbox" class="h-4 w-4 accent-brand-500" /> 适应宽度
+          </label>
           <div class="ml-auto flex items-center gap-2 text-sm text-stone-500">
             <span>底板</span>
             <select v-model.number="boardSize" class="input !w-24 !py-1 text-xs">
@@ -315,21 +340,36 @@ function remove() {
               <option :value="104">104×104</option>
             </select>
             <span>格子</span>
-            <input v-model.number="cellSize" type="range" min="10" max="40" step="1" class="w-32 accent-brand-500" />
-            <span class="w-8 text-right text-xs">{{ cellSize }}px</span>
+            <input
+              v-model.number="cellSize"
+              type="range"
+              min="10"
+              max="32"
+              step="1"
+              :disabled="fitWidth"
+              class="w-40 accent-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+              title="关闭「适应宽度」后可手动调整格子大小"
+              @input="useManualCell"
+            />
+            <span class="w-11 text-right text-xs tabular-nums">{{ fitWidth ? fittedCell : cellSize }}px</span>
+            <button v-if="!fitWidth" type="button" class="text-xs font-medium text-brand-500 hover:underline" @click="fitWidth = true">
+              适应
+            </button>
           </div>
         </div>
 
-        <div class="overflow-auto rounded-xl bg-stone-50 p-4" style="max-height: 70vh">
+        <div ref="gridWrap" class="overflow-auto rounded-xl bg-stone-50 p-4" style="max-height: 70vh">
           <div class="inline-block">
             <PatternGrid
               :pattern="pattern"
               :palette="palette"
-              :cell-size="cellSize"
+              :cell-size="fitWidth ? fittedCell : cellSize"
               :show-codes="showCodes"
               :grid="showGrid"
               :progress="progressMode ? progressSet : null"
               :clickable="progressMode"
+              show-coords
+              :board-size="boardSize"
               @cell-click="toggleCell"
             />
           </div>
@@ -337,7 +377,7 @@ function remove() {
       </section>
 
       <!-- 用豆统计 -->
-      <aside class="card p-4 sm:p-5">
+      <aside class="card min-w-0 p-4 sm:p-5">
         <h2 class="mb-3 text-sm font-semibold text-stone-700">🧮 用豆统计</h2>
         <ColorLegend :pattern="pattern" :palette="palette" />
         <p class="no-print mt-4 rounded-xl bg-brand-50 p-3 text-xs leading-5 text-brand-700">
