@@ -24,7 +24,6 @@ import {
   renderBoardLayout
 } from '../utils/export'
 import { buildPatternFromRows, convertPatternPalette } from '../utils/quantize'
-import { compressToEncodedURIComponent } from 'lz-string'
 
 const route = useRoute()
 const router = useRouter()
@@ -192,29 +191,52 @@ function downloadBoardLayout() {
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-底板布局图.png`)
 }
 
-async function shareLink() {
+const SHARE_MAP_KEY = 'share_map'
+const shareId = ref('')
+const shareErr = ref('')
+const shareOk = ref(false)
+
+function loadShareMap(): Record<string, { name: string; paletteId: string; rows: string[][]; tags: string[]; createdAt: number }> {
+  return loadJSON(SHARE_MAP_KEY, {})
+}
+function randomShareId() {
+  const map = loadShareMap()
+  let id = ''
+  do {
+    id = String(Math.floor(10000 + Math.random() * 90000))
+  } while (map[id])
+  shareId.value = id
+}
+function openShare() {
+  shareErr.value = ''
+  shareOk.value = false
+  randomShareId()
+  showShare.value = true
+}
+function generateShare() {
   if (!pattern.value) return
-  const data = {
-    name: pattern.value.name,
-    paletteId: pattern.value.paletteId,
-    rows: pattern.value.rows,
-    tags: pattern.value.tags ?? []
-  }
-  const json = JSON.stringify(data)
-  if (json.length > 90000) {
-    alert('图纸太大，生成的链接会超出浏览器限制，建议改用「下载图」分享文件。')
+  const id = shareId.value.trim()
+  if (!/^\d{1,5}$/.test(id)) {
+    shareErr.value = '编号只能是 1-5 位数字，请重新输入'
     return
   }
-  shareUrl.value = `${location.origin}${location.pathname}#/share/${compressToEncodedURIComponent(json)}`
-  shareCopied.value = false
-  showShare.value = true
-  // 尽力写入剪贴板（失败也不影响弹窗展示链接）
-  try {
-    await navigator.clipboard.writeText(shareUrl.value)
-    shareCopied.value = true
-  } catch {
-    /* ignore */
+  const map = loadShareMap()
+  if (map[id]) {
+    shareErr.value = `该链接已存在（${id}），请换一个编号`
+    return
   }
+  map[id] = {
+    name: pattern.value.name,
+    paletteId: pattern.value.paletteId,
+    rows: pattern.value.rows.map((r) => [...r]),
+    tags: pattern.value.tags ?? [],
+    createdAt: Date.now()
+  }
+  saveJSON(SHARE_MAP_KEY, map)
+  shareUrl.value = `${location.origin}${location.pathname}#/share/${id}`
+  shareErr.value = ''
+  shareOk.value = true
+  shareCopied.value = false
 }
 async function copyShareUrl() {
   try {
@@ -352,7 +374,7 @@ function remove() {
         <button class="btn btn-secondary" @click="printA4">🖨 A4 分区打印</button>
         <button class="btn btn-secondary" @click="openShoppingList">🛒 购物清单</button>
         <button class="btn btn-secondary" @click="downloadBoardLayout">⬇ 底板布局图</button>
-        <button class="btn btn-secondary" @click="shareLink">🔗 分享</button>
+        <button class="btn btn-secondary" @click="openShare">🔗 分享</button>
         <button class="btn btn-secondary" @click="showConvert = !showConvert; convertMsg = ''">
           {{ showConvert ? '✕ 关闭换色' : '🔁 换色卡' }}
         </button>
@@ -524,10 +546,28 @@ function remove() {
         <h3 class="text-base font-semibold text-stone-800">🔗 分享图纸 · {{ pattern.name }}</h3>
         <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="showShare = false">✕</button>
       </div>
-      <p class="mt-1 text-xs leading-5 text-stone-500">把下面的链接发给别人，对方打开即可查看图纸（数据已编码在链接里）。</p>
-      <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
+      <p class="mt-1 text-xs leading-5 text-stone-500">生成一个短链接发给别人，对方打开即可查看图纸。编号为 1-5 位数字，可以自定义。</p>
+      <div v-if="!shareOk" class="mt-3 flex flex-wrap items-center gap-2">
+        <div class="flex flex-1 items-center overflow-hidden rounded-xl ring-1 ring-stone-200 focus-within:ring-2 focus-within:ring-brand-400">
+          <span class="shrink-0 pl-3 text-xs text-stone-400">#/share/</span>
+          <input
+            v-model="shareId"
+            class="w-full min-w-0 border-0 bg-transparent px-1 py-2 font-mono text-sm text-stone-800 outline-none placeholder:text-stone-300"
+            maxlength="5"
+            inputmode="numeric"
+            placeholder="编号"
+            @keydown.enter="generateShare"
+          />
+        </div>
+        <button class="btn btn-secondary !py-2 text-xs" @click="randomShareId">🎲 随机</button>
+        <button class="btn btn-primary !py-2 text-xs" @click="generateShare">生成链接</button>
+      </div>
+      <p v-if="shareErr" class="mt-2 text-xs text-red-500">{{ shareErr }}</p>
+      <template v-if="shareOk">
+        <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
+      </template>
       <div class="mt-4 flex flex-wrap gap-2">
-        <button class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>
+        <button v-if="shareOk" class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>
         <button class="btn btn-secondary" @click="showShare = false">关闭</button>
       </div>
     </div>

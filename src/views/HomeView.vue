@@ -25,11 +25,12 @@ const filtered = computed(() => {
   })
 })
 
-// 分页：每页 24 张，筛选变化时回到第 1 页
-const PAGE_SIZE = 24
+// 分页：默认每页 14 张，可切换每页数量；筛选变化时回到第 1 页
+const pageSizeOptions = [14, 20, 28, 40]
+const pageSize = ref(14)
 const page = ref(1)
-const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-const pagedList = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
+const pagedList = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const pageNumbers = computed(() => {
   const n = totalPages.value
   const cur = page.value
@@ -40,7 +41,7 @@ const pageNumbers = computed(() => {
 function goPage(p: number) {
   page.value = Math.max(1, Math.min(p, totalPages.value))
 }
-watch([keyword, activeTag], () => {
+watch([keyword, activeTag, pageSize], () => {
   page.value = 1
 })
 
@@ -127,6 +128,13 @@ const favCount = computed(() => store.state.favorites.length)
 
       <div v-if="totalPages > 1" class="mt-6 flex flex-wrap items-center justify-center gap-1.5">
         <span class="mr-2 text-xs text-stone-400">共 {{ filtered.length }} 张 · 第 {{ page }}/{{ totalPages }} 页</span>
+        <label class="flex items-center gap-1.5 text-xs text-stone-400">
+          每页
+          <select v-model.number="pageSize" class="input !w-16 !px-1.5 !py-1 text-xs">
+            <option v-for="n in pageSizeOptions" :key="n" :value="n">{{ n }}</option>
+          </select>
+          张
+        </label>
         <button class="chip !px-3" :disabled="page <= 1" @click="goPage(page - 1)">‹ 上一页</button>
         <button
           v-for="n in pageNumbers"

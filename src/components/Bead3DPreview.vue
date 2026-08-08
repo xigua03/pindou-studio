@@ -40,7 +40,8 @@ function render() {
   ctx.clearRect(0, 0, W, H)
 
   const bx = (W - boardW) / 2
-  const by = (H - boardH * scaleY) / 2 + (boardH * (1 - scaleY)) / 2
+  // 经过 translate+scale 变换后，让底板在画布内垂直居中且不被裁剪
+  const by = (H - boardH) / (2 * scaleY)
 
   ctx.save()
   ctx.translate(0, (boardH * (1 - scaleY)) / 2)
@@ -86,7 +87,14 @@ function render() {
   ctx.restore()
 }
 
-onMounted(render)
+onMounted(() => {
+  // 大图纸自动缩小豆子，保证整张图能在预览区里完整看到
+  const max = Math.max(props.pattern.width, props.pattern.height)
+  if (max > 56) {
+    cell.value = Math.max(8, Math.min(16, Math.floor(880 / max)))
+  }
+  render()
+})
 watch([() => props.pattern, () => props.palette, tilt, cell], render, { deep: true })
 </script>
 

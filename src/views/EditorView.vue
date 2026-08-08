@@ -501,6 +501,12 @@ function save() {
   saved.value = true
   setTimeout(() => (saved.value = false), 1500)
 }
+function exitEditor() {
+  // 有未保存修改时 onBeforeRouteLeave 会弹窗确认；默认返回上一页，无历史则回图纸详情
+  if (window.history.length > 1) router.back()
+  else if (working.value?.id) router.push('/pattern/' + working.value.id)
+  else router.push('/')
+}
 </script>
 <template>
   <div v-if="working && palette" class="space-y-5">
@@ -510,6 +516,7 @@ function save() {
         <p class="mt-1 text-sm text-stone-500">{{ working.name }} · {{ working.width }}×{{ working.height }} 格 · {{ palette.title }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
+        <button class="btn btn-secondary" title="退出编辑" @click="exitEditor">← 退出</button>
         <button class="btn btn-secondary" :disabled="!canUndo" @click="undo">⟲ 撤销</button>
         <button class="btn btn-secondary" :disabled="!canRedo" @click="redo">⟳ 重做</button>
         <button class="btn btn-secondary" @click="rotate">⟳ 旋转90°</button>

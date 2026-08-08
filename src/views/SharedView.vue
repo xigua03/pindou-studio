@@ -14,38 +14,53 @@ import {
   safeFileName
 } from '../utils/export'
 import { decompressFromEncodedURIComponent } from 'lz-string'
+import { loadJSON } from '../utils/storage'
 
 const route = useRoute()
 
+interface ShareEntry {
+  name?: string
+  paletteId?: string
+  rows?: string[][]
+  tags?: string[]
+  createdAt?: number
+}
+
+function entryToPattern(raw: ShareEntry, token: string): Pattern | null {
+  if (!raw || !Array.isArray(raw.rows) || !raw.paletteId || !getPalette(raw.paletteId)) return null
+  const rows = raw.rows.map((r) => (Array.isArray(r) ? r.map((c) => String(c)) : []))
+  const w = Math.max(1, rows[0]?.length ?? 0)
+  const h = rows.length
+  let hash = 0
+  for (let i = 0; i < token.length; i++) hash = (hash * 31 + token.charCodeAt(i)) >>> 0
+  return {
+    id: 'shared-' + hash.toString(36),
+    name: raw.name || '共享图纸',
+    tags: raw.tags ?? [],
+    paletteId: raw.paletteId,
+    width: w,
+    height: h,
+    rows,
+    source: 'generated',
+    createdAt: raw.createdAt ?? 0
+  }
+}
+
 const pattern = computed<Pattern | null>(() => {
+  const token = String(route.params.token ?? '')
+  if (!token) return null
+  // 新短链接：#/share/<1-5位数字>，从本机已生成的分享映射里读取
+  if (/^\d{1,5}$/.test(token)) {
+    const map = loadJSON<Record<string, ShareEntry>>('share_map', {})
+    const entry = map[token]
+    if (!entry) return null
+    return entryToPattern(entry, token)
+  }
+  // 兼容旧链接：LZ 压缩或原始 JSON
   try {
-    const token = String(route.params.token ?? '')
-    if (!token) return null
-    // 新链接用 LZ 压缩；旧链接是原始 JSON（以 { 开头），兼容解析
     const rawText = token.startsWith('{') ? token : (decompressFromEncodedURIComponent(token) || token)
-    const raw = JSON.parse(rawText) as {
-      name?: string
-      paletteId?: string
-      rows?: string[][]
-      tags?: string[]
-    }
-    if (!raw || !Array.isArray(raw.rows) || !raw.paletteId || !getPalette(raw.paletteId)) return null
-    const rows = raw.rows.map((r) => (Array.isArray(r) ? r.map((c) => String(c)) : []))
-    const w = Math.max(1, rows[0]?.length ?? 0)
-    const h = rows.length
-    let hash = 0
-    for (let i = 0; i < token.length; i++) hash = (hash * 31 + token.charCodeAt(i)) >>> 0
-    return {
-      id: 'shared-' + hash.toString(36),
-      name: raw.name || '共享图纸',
-      tags: raw.tags ?? [],
-      paletteId: raw.paletteId,
-      width: w,
-      height: h,
-      rows,
-      source: 'generated',
-      createdAt: 0
-    }
+    const raw = JSON.parse(rawText) as ShareEntry
+    return entryToPattern(raw, token)
   } catch {
     return null
   }
@@ -136,7 +151,7 @@ function exportCSV() {
   </div>
 
   <div v-else class="card p-10 text-center">
-    <p class="text-lg font-medium text-stone-600">分享链接无效或已损坏</p>
+    <p class="text-lg font-medium text-stone-600">分享链接不存在或已失效</p>
     <router-link to="/" class="btn btn-primary mt-4">返回图纸库</router-link>
   </div>
 </template>
