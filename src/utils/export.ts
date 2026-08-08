@@ -477,6 +477,139 @@ ${pages.join('\n')}
   setTimeout(() => w.print(), 600)
 }
 
+/** 底板布局图：整图按底板尺寸分割，标注每块板编号与边界线，方便规划拼豆顺序 */
+export function renderBoardLayout(
+  pattern: Pattern,
+  palette: BeadPalette,
+  opts: { boardSize?: number; cellSize?: number } = {}
+): HTMLCanvasElement {
+  const boardSize = opts.boardSize ?? 29
+  const byCode = new Map(palette.colors.map((c) => [c.code, c]))
+  const usage = computeColorUsage(pattern)
+  const totalBeads = usage.reduce((s, u) => s + u.count, 0)
+  const bx = Math.max(1, Math.ceil(pattern.width / boardSize))
+  const by = Math.max(1, Math.ceil(pattern.height / boardSize))
+  const totalBoards = bx * by
+
+  const cell = opts.cellSize ?? Math.max(5, Math.min(14, Math.floor(1500 / Math.max(pattern.width, boardSize))))
+  const strip = cell
+  const pad = 16
+  const headerH = 58
+  const footerH = 26
+  const W = pad * 2 + strip + pattern.width * cell
+  const H = pad + headerH + strip + pattern.height * cell + footerH + pad
+
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, W, H)
+
+  const f = (weight: string, size: number) =>
+    `${weight} ${size}px "Microsoft YaHei","PingFang SC",sans-serif`
+
+  ctx.fillStyle = '#1f2937'
+  ctx.font = f('bold', 20)
+  ctx.fillText(`${pattern.name} · 底板布局图`, pad, pad + 22)
+  ctx.fillStyle = '#6b7280'
+  ctx.font = f('', 12)
+  ctx.fillText(
+    `${pattern.width} × ${pattern.height} 格 · ${palette.title} · 每板 ${boardSize}×${boardSize} · 共 ${totalBoards} 块板（${bx}×${by}）· 共 ${totalBeads} 颗豆`,
+    pad,
+    pad + 42
+  )
+
+  const gx = pad + strip
+  const gy = pad + headerH + strip
+
+  // 格子
+  for (let y = 0; y < pattern.height; y++) {
+    const row = pattern.rows[y] ?? []
+    for (let x = 0; x < pattern.width; x++) {
+      const code = row[x] ?? ''
+      if (!code || code === '.') continue
+      const color = byCode.get(code)
+      if (!color) continue
+      ctx.fillStyle = color.hex
+      ctx.fillRect(gx + x * cell, gy + y * cell, cell, cell)
+    }
+  }
+  // 细网格线
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)'
+  ctx.lineWidth = 0.5
+  ctx.beginPath()
+  for (let x = 0; x <= pattern.width; x++) {
+    const px = gx + x * cell
+    ctx.moveTo(px, gy)
+    ctx.lineTo(px, gy + pattern.height * cell)
+  }
+  for (let y = 0; y <= pattern.height; y++) {
+    const py = gy + y * cell
+    ctx.moveTo(gx, py)
+    ctx.lineTo(gx + pattern.width * cell, py)
+  }
+  ctx.stroke()
+
+  // 底板边界粗线
+  ctx.strokeStyle = 'rgba(224,36,36,0.85)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  for (let bxi = 1; bxi < bx; bxi++) {
+    const px = gx + bxi * boardSize * cell
+    ctx.moveTo(px, gy)
+    ctx.lineTo(px, gy + pattern.height * cell)
+  }
+  for (let byi = 1; byi < by; byi++) {
+    const py = gy + byi * boardSize * cell
+    ctx.moveTo(gx, py)
+    ctx.lineTo(gx + pattern.width * cell, py)
+  }
+  ctx.stroke()
+
+  // 每块板编号（红底白字圆形徽标，居中）
+  ctx.font = f('bold', Math.max(10, Math.round(cell * 1.4)))
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  let n = 1
+  for (let byi = 0; byi < by; byi++) {
+    for (let bxi = 0; bxi < bx; bxi++) {
+      const bw = Math.min(boardSize, pattern.width - bxi * boardSize)
+      const bh = Math.min(boardSize, pattern.height - byi * boardSize)
+      const cx = gx + bxi * boardSize * cell + (bw * cell) / 2
+      const cy = gy + byi * boardSize * cell + (bh * cell) / 2
+      const r = Math.max(9, cell * 1.1)
+      ctx.fillStyle = 'rgba(224,36,36,0.88)'
+      ctx.beginPath()
+      ctx.arc(cx, cy, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(String(n), cx, cy + 0.5)
+      n++
+    }
+  }
+
+  // 坐标数字（每 5 格与末尾标注）
+  ctx.font = f('', Math.max(7, Math.round(cell * 0.5)))
+  ctx.fillStyle = '#6b7280'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (let x = 0; x < pattern.width; x++) {
+    if (x % 5 === 0 || x === pattern.width - 1) ctx.fillText(String(x + 1), gx + x * cell + cell / 2, gy - strip / 2)
+  }
+  ctx.textAlign = 'right'
+  for (let y = 0; y < pattern.height; y++) {
+    if (y % 5 === 0 || y === pattern.height - 1) ctx.fillText(String(y + 1), gx - 4, gy + y * cell + cell / 2)
+  }
+
+  // 底部说明
+  ctx.fillStyle = '#9ca3af'
+  ctx.font = f('', 11)
+  ctx.textAlign = 'left'
+  ctx.fillText(`拼豆工坊 · ${pattern.name} · 编号从左上角 1 开始，按行递增`, pad, H - pad)
+  return canvas
+}
+
 /* ---------- 购物清单 ---------- */
 
 export interface ShoppingItem {
@@ -486,6 +619,8 @@ export interface ShoppingItem {
   owned: number
   /** 需购数量 = max(0, 需要 - 已有)；未登记库存时视为 0 */
   need: number
+  /** 占整张图纸豆数的百分比（一位小数） */
+  pct: number
   status: 'enough' | 'short' | 'none' | 'noData'
 }
 
@@ -497,35 +632,46 @@ export function computeShoppingList(
 ): ShoppingItem[] {
   const byCode = new Map(palette.colors.map((c) => [c.code, c]))
   const usage = computeColorUsage(pattern)
+  const total = usage.reduce((s, u) => s + u.count, 0)
   const list: ShoppingItem[] = usage.map((u) => {
     const owned = ownedCount(u.code)
     const need = Math.max(0, u.count - owned)
     const status: ShoppingItem['status'] =
       owned >= u.count ? 'enough' : owned > 0 ? 'short' : 'none'
-    return { code: u.code, hex: byCode.get(u.code)?.hex ?? '#cccccc', count: u.count, owned, need, status }
+    const pct = total > 0 ? Math.round((u.count / total) * 1000) / 10 : 0
+    return { code: u.code, hex: byCode.get(u.code)?.hex ?? '#cccccc', count: u.count, owned, need, pct, status }
   })
   return list.sort((a, b) => b.need - a.need)
 }
 
-/** 打印版购物清单（新窗口，可直接打印/另存 PDF） */
-export function printShoppingList(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[]): void {
+/** 打印版购物清单（新窗口，可直接打印/另存 PDF），pricePerBead > 0 时显示单价与小计 */
+export function printShoppingList(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[], pricePerBead = 0): void {
   const totalNeed = items.reduce((s, i) => s + i.need, 0)
+  const totalCost = pricePerBead > 0 ? totalNeed * pricePerBead : 0
+  // 购物清单不再展示单价/小计列，仅在小计行给出预估费用
+  const priceTh = ''
   const rows = items
     .map((i) => {
       const badge =
         i.status === 'enough'
           ? '<span style="color:#16a34a">充足</span>'
           : `<span style="color:${i.need > 0 ? '#ea580c' : '#6b7280'}">${i.need > 0 ? `需购 ${i.need}` : '刚好'}</span>`
+      const priceTd = ''
       return `<tr>
         <td style="padding:5px 10px;border:1px solid #e5e5e5;"><span style="display:inline-block;width:18px;height:18px;background:${i.hex};border-radius:4px;border:1px solid #ddd;vertical-align:middle;margin-right:6px;"></span></td>
         <td style="padding:5px 10px;border:1px solid #e5e5e5;font-family:Consolas,monospace;">${i.code}</td>
         <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;">${i.count}</td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;">${i.pct}%</td>
         <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;">${i.owned}</td>
         <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;font-weight:600;">${i.need}</td>
+        ${priceTd}
         <td style="padding:5px 10px;border:1px solid #e5e5e5;">${badge}</td>
       </tr>`
     })
     .join('')
+  const costLine = pricePerBead > 0
+    ? ` · 预估费用 <b style="color:#ea580c">¥${totalCost.toFixed(2)}</b>（单价 ¥${pricePerBead.toFixed(3)}/颗）`
+    : ''
   const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -546,10 +692,10 @@ export function printShoppingList(pattern: Pattern, palette: BeadPalette, items:
   <h1>🛒 购物清单 · ${pattern.name}</h1>
   <div class="meta">${pattern.width}×${pattern.height} 格 · 色卡 ${palette.title} · 共 ${pattern.rows.reduce((s, r) => s + r.filter((c) => c && c !== '.').length, 0)} 颗豆</div>
   <table>
-    <tr><th>颜色</th><th>色号</th><th style="text-align:right">需要</th><th style="text-align:right">已有</th><th style="text-align:right">需购</th><th>状态</th></tr>
+    <tr><th>颜色</th><th>色号</th><th style="text-align:right">需要</th><th style="text-align:right">占比</th><th style="text-align:right">已有</th><th style="text-align:right">需购</th>${priceTh}<th>状态</th></tr>
     ${rows}
   </table>
-  <p class="total">共需补购 <b style="color:#ea580c">${totalNeed}</b> 颗豆子（未登记库存的按 0 计算）</p>
+  <p class="total">共需补购 <b style="color:#ea580c">${totalNeed}</b> 颗豆子${costLine}（未登记库存的按 0 计算）</p>
 </body>
 </html>`
   const w = window.open('', '_blank', 'width=900,height=1000')
@@ -561,13 +707,17 @@ export function printShoppingList(pattern: Pattern, palette: BeadPalette, items:
 }
 
 /** 购物清单 CSV */
-export function exportShoppingCSV(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[]): string {
-  const lines = ['色号,颜色,需要,已有,需购,状态']
+export function exportShoppingCSV(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[], pricePerBead = 0): string {
+  const lines = ['色号,颜色,需要,占比%,已有,需购,状态']
   for (const i of items) {
     const status = i.status === 'enough' ? '库存充足' : i.status === 'short' ? '部分缺少' : i.status === 'none' ? '未持有' : '未登记'
-    lines.push(`${i.code},${i.hex},${i.count},${i.owned},${i.need},${status}`)
+    lines.push(`${i.code},${i.hex},${i.count},${i.pct},${i.owned},${i.need},${status}`)
   }
   lines.push('')
-  lines.push(`合计需购,${items.reduce((s, i) => s + i.need, 0)},,,,`)
+  const totalNeed = items.reduce((s, i) => s + i.need, 0)
+  lines.push(`合计需购,${totalNeed},,,,`)
+  if (pricePerBead > 0) {
+    lines.push(`预估费用（单价 ${pricePerBead.toFixed(3)} 元/颗）:${(totalNeed * pricePerBead).toFixed(2)}`)
+  }
   return '\uFEFF' + lines.join('\r\n')
 }

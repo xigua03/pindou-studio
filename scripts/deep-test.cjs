@@ -335,18 +335,22 @@ async function clickByText(page, text) {
     const convertOk = convertSelOk && urlAfterConvert.includes('/pattern/') && !urlAfterConvert.includes('builtin-heart') && convertBody.includes('我的图纸')
     console.log(convertOk ? 'PASS  换色卡生成副本并跳转' : 'FAIL  换色卡（sel=' + convertSelOk + ' url=' + urlAfterConvert + '）')
 
-    // ⑪ 购物清单：弹出打印窗口包含需购
+    // ⑪ 购物清单：打开 BOM 弹窗（含需购/占比/色号），再点「打印 / 存 PDF」弹出打印窗口
     let shopOk = false
-    const shopPopup = new Promise((res) => page.once('popup', (p) => res(p)))
     await clickByText(page, '购物清单')
+    await new Promise((r) => setTimeout(r, 600))
+    const bomText = await page.evaluate(() => document.body.innerText)
+    shopOk = bomText.includes('需购') && bomText.includes('色号') && bomText.includes('占比')
+    const shopPopup = new Promise((res) => page.once('popup', (p) => res(p)))
+    await clickByText(page, '存 PDF')
     try {
       const popup = await Promise.race([shopPopup, new Promise((_, rej) => setTimeout(() => rej(new Error('no popup')), 5000))])
       await new Promise((r) => setTimeout(r, 1000))
       const popupText = await popup.evaluate(() => document.body.innerText)
-      shopOk = popupText.includes('需购') && popupText.includes('色号')
+      shopOk = shopOk && popupText.includes('需购') && popupText.includes('色号')
       try { await popup.close() } catch { /* ignore */ }
     } catch { shopOk = false }
-    console.log(shopOk ? 'PASS  购物清单导出（含需购）' : 'FAIL  购物清单导出')
+    console.log(shopOk ? 'PASS  购物清单导出（含需购/占比）' : 'FAIL  购物清单导出')
 
     // ⑫ 仅用手头颜色生成：生成器勾选后仍能生成成功
     await page.goto(BASE + '#/generator', { waitUntil: 'networkidle0' })

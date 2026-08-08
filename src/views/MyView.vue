@@ -10,6 +10,48 @@ const tab = ref<'favorites' | 'saved'>('favorites')
 const batchMode = ref(false)
 const selected = ref<string[]>([])
 
+// ---------- 分组 ----------
+const activeGroup = ref<'all' | 'none' | string>('all')
+const newGroupName = ref('')
+const groupMenuId = ref<string | null>(null)
+const batchGroupId = ref('')
+
+const inGroup = (groupId: string, patternId: string) =>
+  store.state.groups.find((g) => g.id === groupId)?.patternIds.includes(patternId) ?? false
+
+const groupFilter = (p: { id: string }) => {
+  if (activeGroup.value === 'all') return true
+  if (activeGroup.value === 'none') return store.patternGroups(p.id).length === 0
+  return inGroup(activeGroup.value, p.id)
+}
+const shownList = computed(() => list.value.filter(groupFilter))
+
+function toggleGroupMenu(id: string) {
+  groupMenuId.value = groupMenuId.value === id ? null : id
+}
+function togglePatternInGroup(g: { id: string }, p: { id: string }) {
+  if (inGroup(g.id, p.id)) store.removeFromGroup(g.id, p.id)
+  else store.addToGroup(g.id, p.id)
+}
+function createGroup() {
+  const name = newGroupName.value.trim()
+  if (!name) return
+  store.createGroup(name)
+  newGroupName.value = ''
+  activeGroup.value = 'all'
+}
+function deleteGroup(g: { id: string; name: string }) {
+  if (confirm(`确定删除分组「${g.name}」吗？图纸不会被删除，只是移出该分组。`)) {
+    store.deleteGroup(g.id)
+    if (activeGroup.value === g.id) activeGroup.value = 'all'
+  }
+}
+function applyBatchGroup() {
+  if (!selected.value.length) return
+  store.assignPatternsToGroup(selected.value, batchGroupId.value || null)
+  selected.value = []
+}
+
 const favoritePatterns = computed(() =>
   store.state.favorites
     .map((id) => store.getPattern(id))
@@ -199,6 +241,43 @@ function doImport() {
       </button>
     </div>
 
+    <!-- 分组筛选 -->
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs font-medium text-stone-400">分组</span>
+      <button
+        class="chip"
+        :class="activeGroup === 'all' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
+        @click="activeGroup = 'all'"
+      >
+        全部
+      </button>
+      <button
+        class="chip"
+        :class="activeGroup === 'none' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
+        @click="activeGroup = 'none'"
+      >
+        未分组
+      </button>
+      <button
+        v-for="g in store.state.groups"
+        :key="g.id"
+        class="chip"
+        :class="activeGroup === g.id ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
+        @click="activeGroup = g.id"
+      >
+        {{ g.name }}（{{ g.patternIds.length }}）
+      </button>
+      <span class="flex items-center gap-1.5">
+        <input
+          v-model="newGroupName"
+          class="input !w-32 !py-1 text-xs"
+          placeholder="新建分组"
+          @keydown.enter="createGroup"
+        />
+        <button class="btn btn-secondary !px-2 !py-1 text-xs" title="新建分组" @click="createGroup">＋</button>
+      </span>
+    </div>
+
     <!-- 导入图纸面板 -->
     <div v-if="showImport" class="card space-y-3 p-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -253,6 +332,11 @@ function doImport() {
       </button>
       <span class="text-sm text-stone-500">已选 <b class="text-brand-500">{{ selected.length }}</b> 项</span>
       <div class="ml-auto flex flex-wrap gap-2">
+        <select v-model="batchGroupId" class="input !w-40 !py-1.5 text-xs">
+          <option value="">移出所有分组</option>
+          <option v-for="g in store.state.groups" :key="g.id" :value="g.id">移动到「{{ g.name }}」</option>
+        </select>
+        <button class="btn btn-secondary !py-1.5" @click="applyBatchGroup">📁 移动分组</button>
         <button v-if="tab === 'saved'" class="btn btn-secondary !py-1.5" @click="batchFav(true)">♡ 批量收藏</button>
         <button v-else class="btn btn-secondary !py-1.5" @click="batchFav(false)">♡ 取消收藏</button>
         <button class="btn btn-danger !py-1.5" @click="batchDelete">🗑 批量删除</button>
@@ -261,8 +345,8 @@ function doImport() {
 
     <!-- 收藏 -->
     <template v-if="tab === 'favorites'">
-      <div v-if="favoritePatterns.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <div v-for="p in favoritePatterns" :key="p.id" class="relative">
+      <div v-if="shownList.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div v-for="p in shownList" :key="p.id" class="relative">
           <PatternCard :pattern="p" :palette="getPalette(p.paletteId)!" />
           <label
             v-if="batchMode"
@@ -273,18 +357,49 @@ function doImport() {
             <input type="checkbox" class="sr-only" :checked="isSelected(p.id)" />
             ✓
           </label>
+          <button
+            v-if="!batchMode"
+            class="absolute right-2 top-2 z-10 grid h-6 w-6 place-items-center rounded-md bg-white/90 text-xs shadow ring-1 ring-stone-200 hover:bg-white"
+            title="加入分组"
+            @click.stop="toggleGroupMenu(p.id)"
+          >
+            📁
+          </button>
+          <div
+            v-if="groupMenuId === p.id"
+            class="absolute right-2 top-9 z-20 w-44 rounded-xl bg-white p-2 shadow-lg ring-1 ring-stone-200"
+            @click.stop
+          >
+            <div class="max-h-40 space-y-0.5 overflow-auto">
+              <label
+                v-for="g in store.state.groups"
+                :key="g.id"
+                class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-stone-50"
+              >
+                <input
+                  type="checkbox"
+                  class="h-3.5 w-3.5 accent-brand-500"
+                  :checked="inGroup(g.id, p.id)"
+                  @change="togglePatternInGroup(g, p)"
+                />
+                {{ g.name }}
+              </label>
+              <p v-if="!store.state.groups.length" class="px-2 py-1 text-[11px] text-stone-400">还没有分组，先在顶部新建一个</p>
+            </div>
+          </div>
         </div>
       </div>
       <div v-else class="card p-10 text-center text-sm text-stone-400">
-        还没有收藏任何图纸
+        <template v-if="activeGroup === 'all'">还没有收藏任何图纸</template>
+        <template v-else>该分组下没有收藏的图纸</template>
         <router-link to="/" class="mt-3 block font-medium text-brand-500 hover:underline">去图纸库逛逛 →</router-link>
       </div>
     </template>
 
     <!-- 我的图纸 -->
     <template v-else>
-      <div v-if="store.state.savedPatterns.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <div v-for="p in store.state.savedPatterns" :key="p.id" class="relative">
+      <div v-if="shownList.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div v-for="p in shownList" :key="p.id" class="relative">
           <PatternCard :pattern="p" :palette="getPalette(p.paletteId)!" />
           <label
             v-if="batchMode"
@@ -295,10 +410,41 @@ function doImport() {
             <input type="checkbox" class="sr-only" :checked="isSelected(p.id)" />
             ✓
           </label>
+          <button
+            v-if="!batchMode"
+            class="absolute right-2 top-2 z-10 grid h-6 w-6 place-items-center rounded-md bg-white/90 text-xs shadow ring-1 ring-stone-200 hover:bg-white"
+            title="加入分组"
+            @click.stop="toggleGroupMenu(p.id)"
+          >
+            📁
+          </button>
+          <div
+            v-if="groupMenuId === p.id"
+            class="absolute right-2 top-9 z-20 w-44 rounded-xl bg-white p-2 shadow-lg ring-1 ring-stone-200"
+            @click.stop
+          >
+            <div class="max-h-40 space-y-0.5 overflow-auto">
+              <label
+                v-for="g in store.state.groups"
+                :key="g.id"
+                class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-stone-50"
+              >
+                <input
+                  type="checkbox"
+                  class="h-3.5 w-3.5 accent-brand-500"
+                  :checked="inGroup(g.id, p.id)"
+                  @change="togglePatternInGroup(g, p)"
+                />
+                {{ g.name }}
+              </label>
+              <p v-if="!store.state.groups.length" class="px-2 py-1 text-[11px] text-stone-400">还没有分组，先在顶部新建一个</p>
+            </div>
+          </div>
         </div>
       </div>
       <div v-else class="card p-10 text-center text-sm text-stone-400">
-        还没有保存过图纸，试试用图片生成一张
+        <template v-if="activeGroup === 'all'">还没有保存过图纸，试试用图片生成一张</template>
+        <template v-else>该分组下没有图纸</template>
         <router-link to="/generator" class="mt-3 block font-medium text-brand-500 hover:underline">去图片转图纸 →</router-link>
       </div>
     </template>

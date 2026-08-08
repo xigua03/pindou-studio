@@ -63,10 +63,17 @@ function dedupeAndRemap(patterns: Pattern[], favorites: string[]): { patterns: P
   return { patterns: keep, favorites: favorites.map((id) => remap.get(id) ?? id) }
 }
 
+export interface PatternGroup {
+  id: string
+  name: string
+  patternIds: string[]
+}
+
 interface PersistedState {
   favorites: string[]
   savedPatterns: Pattern[]
   inventory: Inventory
+  groups: PatternGroup[]
 }
 
 const initialFavorites = loadJSON<string[]>('favorites', [])
@@ -76,7 +83,8 @@ const { patterns: dedupedPatterns, favorites: dedupedFavorites } = dedupeAndRema
 const state = reactive<PersistedState>({
   favorites: dedupedFavorites,
   savedPatterns: dedupedPatterns,
-  inventory: loadJSON<Inventory>('inventory', {})
+  inventory: loadJSON<Inventory>('inventory', {}),
+  groups: loadJSON<PatternGroup[]>('groups', [])
 })
 
 // 启动清理（去重）后立即写回本地，避免旧重复数据残留
@@ -98,6 +106,11 @@ watch(
 watch(
   () => state.inventory,
   (v) => saveJSON('inventory', v),
+  { deep: true }
+)
+watch(
+  () => state.groups,
+  (v) => saveJSON('groups', v),
   { deep: true }
 )
 
@@ -155,6 +168,7 @@ export function useStore() {
     const set = new Set(ids)
     state.savedPatterns = state.savedPatterns.filter((p) => !set.has(p.id))
     state.favorites = state.favorites.filter((f) => !set.has(f))
+    for (const g of state.groups) g.patternIds = g.patternIds.filter((id) => !set.has(id))
   }
 
   /** ????????????? */
@@ -172,10 +186,53 @@ export function useStore() {
     setInventory(paletteId, code, cur + delta)
   }
 
+  /** 创建分组，返回新分组 id */
+  const createGroup = (name: string): string => {
+    const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    state.groups.push({ id, name: name.trim() || '未命名分组', patternIds: [] })
+    return id
+  }
+
+  const renameGroup = (id: string, name: string): void => {
+    const g = state.groups.find((x) => x.id === id)
+    if (g) g.name = name.trim() || g.name
+  }
+
+  const deleteGroup = (id: string): void => {
+    state.groups = state.groups.filter((g) => g.id !== id)
+  }
+
+  const addToGroup = (groupId: string, patternId: string): void => {
+    const g = state.groups.find((x) => x.id === groupId)
+    if (g && !g.patternIds.includes(patternId)) g.patternIds.push(patternId)
+  }
+
+  const removeFromGroup = (groupId: string, patternId: string): void => {
+    const g = state.groups.find((x) => x.id === groupId)
+    if (g) g.patternIds = g.patternIds.filter((id) => id !== patternId)
+  }
+
+  /** 把一批图纸移动到某个分组（先移出所有分组再加入）；groupId 为空表示移出所有分组 */
+  const assignPatternsToGroup = (patternIds: string[], groupId: string | null): void => {
+    for (const g of state.groups) {
+      g.patternIds = g.patternIds.filter((id) => !patternIds.includes(id))
+    }
+    if (groupId) {
+      const g = state.groups.find((x) => x.id === groupId)
+      if (g) {
+        for (const id of patternIds) if (!g.patternIds.includes(id)) g.patternIds.push(id)
+      }
+    }
+  }
+
+  const patternGroups = (patternId: string): PatternGroup[] =>
+    state.groups.filter((g) => g.patternIds.includes(patternId))
+
   const resetAll = (): void => {
     state.favorites = []
     state.savedPatterns = []
     state.inventory = {}
+    state.groups = []
   }
 
   return {
@@ -191,6 +248,13 @@ export function useStore() {
     ownedCount,
     setInventory,
     addInventory,
+    createGroup,
+    renameGroup,
+    deleteGroup,
+    addToGroup,
+    removeFromGroup,
+    assignPatternsToGroup,
+    patternGroups,
     resetAll
   }
 }

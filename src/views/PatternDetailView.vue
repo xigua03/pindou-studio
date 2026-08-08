@@ -7,6 +7,7 @@ import { useStore } from '../composables/useStore'
 import { loadJSON, saveJSON } from '../utils/storage'
 import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
+import Bead3DPreview from '../components/Bead3DPreview.vue'
 import {
   computeColorUsage,
   patternToCanvas,
@@ -19,9 +20,11 @@ import {
   safeFileName,
   computeShoppingList,
   printShoppingList,
-  exportShoppingCSV
+  exportShoppingCSV,
+  renderBoardLayout
 } from '../utils/export'
 import { buildPatternFromRows, convertPatternPalette } from '../utils/quantize'
+import { compressToEncodedURIComponent } from 'lz-string'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +49,21 @@ const convertPaletteId = ref('mard-221-github')
 const convertMsg = ref('')
 // 底板规划
 const boardSize = ref(29)
+// 3D 预览
+const show3d = ref(false)
+// 购物清单 / BOM
+const showBom = ref(false)
+const beadPrice = ref(Number(loadJSON('bead_price', 0.05)) || 0.05)
+const showShare = ref(false)
+const shareUrl = ref('')
+const shareCopied = ref(false)
+const bomItems = computed(() =>
+  pattern.value && palette.value
+    ? computeShoppingList(pattern.value, palette.value, (code) => store.ownedCount(pattern.value!.paletteId, code))
+    : []
+)
+const bomTotalNeed = computed(() => bomItems.value.reduce((s, i) => s + i.need, 0))
+const bomTotalCost = computed(() => bomTotalNeed.value * beadPrice.value)
 
 const gridWrap = ref<HTMLElement | null>(null)
 let fitObserver: ResizeObserver | undefined
@@ -149,19 +167,66 @@ function doConvert() {
 }
 
 function openShoppingList() {
-  if (!pattern.value || !palette.value) return
-  const items = computeShoppingList(pattern.value, palette.value, (code) => store.ownedCount(pattern.value!.paletteId, code))
-  printShoppingList(pattern.value, palette.value, items)
+  showBom.value = true
 }
 
-function exportShoppingCsv() {
+function printBom() {
   if (!pattern.value || !palette.value) return
-  const items = computeShoppingList(pattern.value, palette.value, (code) => store.ownedCount(pattern.value!.paletteId, code))
+  printShoppingList(pattern.value, palette.value, bomItems.value, beadPrice.value)
+}
+
+function exportBomCsv() {
+  if (!pattern.value || !palette.value) return
   downloadText(
-    exportShoppingCSV(pattern.value, palette.value, items),
+    exportShoppingCSV(pattern.value, palette.value, bomItems.value, beadPrice.value),
     `${safeFileName(pattern.value.name)}-购物清单.csv`,
     'text/csv;charset=utf-8'
   )
+}
+
+watch(beadPrice, (v) => saveJSON('bead_price', Number(v) || 0))
+
+function downloadBoardLayout() {
+  if (!pattern.value || !palette.value) return
+  const canvas = renderBoardLayout(pattern.value, palette.value, { boardSize: boardSize.value })
+  downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-底板布局图.png`)
+}
+
+async function shareLink() {
+  if (!pattern.value) return
+  const data = {
+    name: pattern.value.name,
+    paletteId: pattern.value.paletteId,
+    rows: pattern.value.rows,
+    tags: pattern.value.tags ?? []
+  }
+  const json = JSON.stringify(data)
+  if (json.length > 90000) {
+    alert('图纸太大，生成的链接会超出浏览器限制，建议改用「下载图」分享文件。')
+    return
+  }
+  shareUrl.value = `${location.origin}${location.pathname}#/share/${compressToEncodedURIComponent(json)}`
+  shareCopied.value = false
+  showShare.value = true
+  // 尽力写入剪贴板（失败也不影响弹窗展示链接）
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    shareCopied.value = true
+  } catch {
+    /* ignore */
+  }
+}
+async function copyShareUrl() {
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    shareCopied.value = true
+    setTimeout(() => (shareCopied.value = false), 2000)
+  } catch {
+    prompt('请手动复制下面的链接', shareUrl.value)
+  }
+}
+function selectShareText(e: Event) {
+  ;(e.target as HTMLInputElement).select()
 }
 
 async function copyGrid() {
@@ -286,12 +351,15 @@ function remove() {
         <button class="btn btn-secondary" @click="doPrint">🖨 打印</button>
         <button class="btn btn-secondary" @click="printA4">🖨 A4 分区打印</button>
         <button class="btn btn-secondary" @click="openShoppingList">🛒 购物清单</button>
+        <button class="btn btn-secondary" @click="downloadBoardLayout">⬇ 底板布局图</button>
+        <button class="btn btn-secondary" @click="shareLink">🔗 分享</button>
         <button class="btn btn-secondary" @click="showConvert = !showConvert; convertMsg = ''">
           {{ showConvert ? '✕ 关闭换色' : '🔁 换色卡' }}
         </button>
         <button class="btn btn-secondary" @click="progressMode = !progressMode">
           {{ progressMode ? '🧭 退出拼豆' : '🧭 拼豆模式' }}
         </button>
+        <button class="btn btn-secondary" @click="show3d = !show3d">{{ show3d ? '✕ 关闭 3D' : '🧊 3D 预览' }}</button>
         <button class="btn btn-primary" @click="edit">✏️ 编辑</button>
         <button v-if="isSaved" class="btn btn-danger" @click="remove">🗑 删除</button>
       </div>
@@ -390,5 +458,89 @@ function remove() {
   <div v-else class="card p-10 text-center">
     <p class="text-lg font-medium text-stone-600">图纸不存在或已删除</p>
     <router-link to="/" class="btn btn-primary mt-4">返回图纸库</router-link>
+
+
+  </div>
+  <!-- BOM 购物清单弹窗 -->
+  <div v-if="showBom && pattern && palette" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+    <div class="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-5 shadow-xl">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-stone-800">🛒 购物清单 / BOM · {{ pattern.name }}</h3>
+        <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="showBom = false">✕</button>
+      </div>
+      <p class="mt-1 text-xs text-stone-400">{{ pattern.width }}×{{ pattern.height }} 格 · 色卡 {{ palette.title }} · 共 {{ totalBeads }} 颗豆</p>
+
+      <div class="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-600">
+        <label class="flex items-center gap-1.5">
+          单价（元/颗）
+          <input v-model.number="beadPrice" type="number" min="0" step="0.001" class="input !w-24 !py-1 text-right" />
+        </label>
+        <span class="ml-auto">需购合计 <b class="text-red-500">{{ bomTotalNeed }}</b> 颗 · 预估费用 <b class="text-red-500">¥{{ bomTotalCost.toFixed(2) }}</b></span>
+      </div>
+
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="border-b border-stone-200 text-left text-stone-400">
+              <th class="py-1.5 pr-2">颜色</th>
+              <th class="py-1.5 pr-2">色号</th>
+              <th class="py-1.5 pr-2 text-right">需要</th>
+              <th class="py-1.5 pr-2 text-right">占比</th>
+              <th class="py-1.5 pr-2 text-right">已有</th>
+              <th class="py-1.5 pr-2 text-right">需购</th>
+              <th class="py-1.5">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="i in bomItems" :key="i.code" class="border-b border-stone-100">
+              <td class="py-1.5 pr-2"><span class="inline-block h-5 w-5 rounded ring-1 ring-stone-200" :style="{ background: i.hex }"></span></td>
+              <td class="py-1.5 pr-2 font-mono font-semibold text-stone-700">{{ i.code }}</td>
+              <td class="py-1.5 pr-2 text-right">{{ i.count }}</td>
+              <td class="py-1.5 pr-2 text-right text-stone-400">{{ i.pct }}%</td>
+              <td class="py-1.5 pr-2 text-right">{{ i.owned }}</td>
+              <td class="py-1.5 pr-2 text-right font-semibold text-stone-700">{{ i.need }}</td>
+              <td class="py-1.5">
+                <span v-if="i.status === 'enough'" class="rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-600">充足</span>
+                <span v-else-if="i.status === 'short'" class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600">部分缺</span>
+                <span v-else class="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-500">需购</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button class="btn btn-primary" @click="printBom">🖨 打印 / 存 PDF</button>
+        <button class="btn btn-secondary" @click="exportBomCsv">⇩ 导出 CSV</button>
+        <button class="btn btn-secondary" @click="showBom = false">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分享链接弹窗 -->
+  <div v-if="showShare && pattern" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-stone-800">🔗 分享图纸 · {{ pattern.name }}</h3>
+        <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="showShare = false">✕</button>
+      </div>
+      <p class="mt-1 text-xs leading-5 text-stone-500">把下面的链接发给别人，对方打开即可查看图纸（数据已编码在链接里，无需登录）。</p>
+      <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>
+        <button class="btn btn-secondary" @click="showShare = false">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3D 预览弹窗 -->
+  <div v-if="show3d && pattern && palette" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+    <div class="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-stone-800">🧊 3D 预览 · {{ pattern.name }}</h3>
+        <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="show3d = false">✕</button>
+      </div>
+      <Bead3DPreview :pattern="pattern" :palette="palette" />
+    </div>
   </div>
 </template>

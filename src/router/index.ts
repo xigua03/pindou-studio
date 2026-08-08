@@ -7,7 +7,8 @@ const routes = [
   { path: '/editor/:id', name: 'editor', component: () => import('../views/EditorView.vue'), meta: { title: '图纸编辑' } },
   { path: '/warehouse', name: 'warehouse', component: () => import('../views/WarehouseView.vue'), meta: { title: '豆仓' } },
   { path: '/mine', name: 'mine', component: () => import('../views/MyView.vue'), meta: { title: '我的' } },
-  { path: '/palette', name: 'palette', component: () => import('../views/PaletteView.vue'), meta: { title: '色卡' } }
+  { path: '/palette', name: 'palette', component: () => import('../views/PaletteView.vue'), meta: { title: '色卡' } },
+  { path: '/share/:token', name: 'share', component: () => import('../views/SharedView.vue'), meta: { title: '共享图纸' } }
 ]
 
 const router = createRouter({

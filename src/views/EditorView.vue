@@ -5,6 +5,7 @@ import type { Pattern } from '../types'
 import { getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
 import { buildPatternFromRows } from '../utils/quantize'
+import { contrastText } from '../utils/color'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,7 +17,7 @@ const cellSize = ref(24)
 const showCodes = ref(true)
 const showCoords = ref(false)
 const boardSize = ref(29)
-const tool = ref<'brush' | 'eraser' | 'pipette'>('brush')
+const tool = ref<'brush' | 'eraser' | 'pipette' | 'fill' | 'select'>('brush')
 const selectedColor = ref('')
 const painting = ref(false)
 const gridRef = ref<HTMLElement | null>(null)
@@ -24,6 +25,19 @@ const originalRows = ref<string[][] | null>(null)
 const unsavedModal = ref(false)
 let pendingLeave: string | null = null
 let allowLeave = false
+
+// 对称绘制：笔刷/橡皮镜像到对称位置
+const symH = ref(false)
+const symV = ref(false)
+// 放大镜
+const magnifier = ref(false)
+const hoverCell = ref<{ x: number; y: number } | null>(null)
+const hoverPos = ref({ x: 0, y: 0 })
+// 框选 / 复制 / 剪切 / 粘贴
+const selection = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+const selecting = ref(false)
+const clip = ref<{ rows: string[][]; w: number; h: number } | null>(null)
+const selMsg = ref('')
 
 // 撤销 / 重做历史栈（每步保存 rows 快照）
 const history = ref<string[][][]>([])
@@ -55,6 +69,10 @@ function redo() {
   restore()
 }
 function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    clearSelection()
+    return
+  }
   if (!(e.ctrlKey || e.metaKey)) return
   const k = e.key.toLowerCase()
   if (k === 'z') {
@@ -64,6 +82,15 @@ function onKeydown(e: KeyboardEvent) {
   } else if (k === 'y') {
     e.preventDefault()
     redo()
+  } else if (k === 'c') {
+    e.preventDefault()
+    copySelection()
+  } else if (k === 'x') {
+    e.preventDefault()
+    cutSelection()
+  } else if (k === 'v') {
+    e.preventDefault()
+    pasteSelection()
   }
 }
 
@@ -135,26 +162,185 @@ onBeforeUnmount(() => {
 })
 
 function endStroke() {
+  if (selecting.value && tool.value === 'select') {
+    selecting.value = false
+    return
+  }
   if (painting.value && (tool.value === 'brush' || tool.value === 'eraser')) pushHistory()
   painting.value = false
   lastCellX = -1
   lastCellY = -1
 }
+function writeCell(x: number, y: number, value: string) {
+  if (!working.value) return
+  const arr = working.value.rows[y]
+  if (!arr || x < 0 || x >= arr.length) return
+  arr[x] = value
+}
+function mirrorPts(x: number, y: number): Array<[number, number]> {
+  if (!working.value) return [[x, y]]
+  const w = working.value.width
+  const h = working.value.height
+  const pts: Array<[number, number]> = [[x, y]]
+  if (symH.value) pts.push([w - 1 - x, y])
+  if (symV.value) pts.push([x, h - 1 - y])
+  if (symH.value && symV.value) pts.push([w - 1 - x, h - 1 - y])
+  return pts
+}
 function paintCell(x: number, y: number) {
   if (!working.value) return
   const arr = working.value.rows[y] ?? []
-  if (tool.value === 'eraser') arr[x] = '.'
-  else if (tool.value === 'pipette') {
+  if (tool.value === 'pipette') {
     const code = arr[x]
     if (code && code !== '.') {
       selectedColor.value = code
       tool.value = 'brush'
     }
     return
-  } else {
-    if (!selectedColor.value) return
-    arr[x] = selectedColor.value
   }
+  if (tool.value === 'brush' || tool.value === 'eraser') {
+    const value = tool.value === 'eraser' ? '.' : selectedColor.value
+    if (tool.value === 'brush' && !value) return
+    for (const [mx, my] of mirrorPts(x, y)) writeCell(mx, my, value)
+  }
+}
+
+// 泛洪填充（油漆桶）：把与点击格同色的连通区域整体换成当前颜色
+function floodFill(x: number, y: number) {
+  if (!working.value || !selectedColor.value) return
+  const rows = working.value.rows
+  const w = working.value.width
+  const h = working.value.height
+  if (x < 0 || y < 0 || x >= w || y >= h) return
+  const target = rows[y]?.[x] ?? '.'
+  const replace = selectedColor.value
+  if (target === replace) return
+  pushHistory()
+  const stack: Array<[number, number]> = [[x, y]]
+  while (stack.length) {
+    const [cx, cy] = stack.pop()!
+    if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue
+    const cur = rows[cy]?.[cx] ?? '.'
+    if (cur !== target) continue
+    rows[cy][cx] = replace
+    stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1])
+  }
+  saved.value = false
+}
+
+// 全局颜色替换：把整张图纸里的某个色号全部换成另一个色号
+const replaceFrom = ref('')
+const replaceTo = ref('')
+const replaceMsg = ref('')
+function globalReplace() {
+  if (!working.value || !replaceFrom.value || !replaceTo.value) return
+  if (replaceFrom.value === replaceTo.value) {
+    replaceMsg.value = '源色号与目标色号相同'
+    setTimeout(() => (replaceMsg.value = ''), 2000)
+    return
+  }
+  pushHistory()
+  let n = 0
+  for (const row of working.value.rows) {
+    for (let i = 0; i < row.length; i++) {
+      if (row[i] === replaceFrom.value) {
+        row[i] = replaceTo.value
+        n++
+      }
+    }
+  }
+  saved.value = false
+  replaceMsg.value = `已替换 ${n} 颗豆`
+  setTimeout(() => (replaceMsg.value = ''), 2500)
+}
+
+// ---------- 框选 / 复制 / 剪切 / 粘贴 ----------
+function selBounds(): { x: number; y: number; w: number; h: number } | null {
+  if (!selection.value) return null
+  const { x0, y0, x1, y1 } = selection.value
+  return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0) + 1, h: Math.abs(y1 - y0) + 1 }
+}
+const hasSelection = computed(() => !!selection.value)
+function isInSelection(x: number, y: number): boolean {
+  const b = selBounds()
+  if (!b) return false
+  return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h
+}
+function clearSelection() {
+  selection.value = null
+  selecting.value = false
+}
+function copySelection() {
+  const b = selBounds()
+  if (!b || !working.value) return
+  const rows: string[][] = []
+  for (let y = b.y; y < b.y + b.h; y++) {
+    const row = working.value.rows[y] ?? []
+    rows.push(Array.from({ length: b.w }, (_, i) => row[b.x + i] ?? '.'))
+  }
+  clip.value = { rows, w: b.w, h: b.h }
+  selMsg.value = `已复制 ${b.w}×${b.h} 区域`
+  setTimeout(() => (selMsg.value = ''), 2000)
+}
+function deleteSelection() {
+  const b = selBounds()
+  if (!b || !working.value) return
+  pushHistory()
+  for (let y = b.y; y < b.y + b.h; y++) {
+    const row = working.value.rows[y]
+    if (!row) continue
+    for (let x = b.x; x < b.x + b.w; x++) if (x < row.length) row[x] = '.'
+  }
+  saved.value = false
+}
+function cutSelection() {
+  copySelection()
+  deleteSelection()
+}
+function pasteSelection() {
+  if (!clip.value || !working.value) return
+  pushHistory()
+  const b = selBounds()
+  const ox = b ? b.x : 0
+  const oy = b ? b.y : 0
+  for (let j = 0; j < clip.value.h; j++) {
+    const row = working.value.rows[oy + j]
+    if (!row) continue
+    for (let i = 0; i < clip.value.w; i++) {
+      const tx = ox + i
+      if (tx < row.length) row[tx] = clip.value.rows[j][i]
+    }
+  }
+  saved.value = false
+  selMsg.value = `已粘贴 ${clip.value.w}×${clip.value.h}`
+  setTimeout(() => (selMsg.value = ''), 2000)
+}
+
+// ---------- 放大镜 ----------
+const magnifyCells = computed(() => {
+  const out: { code: string; hex: string }[][] = []
+  if (!working.value || !hoverCell.value) return out
+  const w = working.value.width
+  const h = working.value.height
+  const cx = hoverCell.value.x
+  const cy = hoverCell.value.y
+  for (let dy = -3; dy <= 3; dy++) {
+    const row: { code: string; hex: string }[] = []
+    for (let dx = -3; dx <= 3; dx++) {
+      const x = cx + dx
+      const y = cy + dy
+      const code = x >= 0 && y >= 0 && x < w && y < h ? working.value.rows[y]?.[x] ?? '.' : ''
+      row.push({ code: code || '.', hex: colorMap.value.get(code)?.hex ?? 'rgba(0,0,0,0.06)' })
+    }
+    out.push(row)
+  }
+  return out
+})
+
+function cellBoxShadow(x: number, y: number): string {
+  const parts = [cellFrameStyle(x, y)]
+  if (isInSelection(x, y)) parts.push('inset 0 0 0 2px rgba(59,130,246,0.85)')
+  return parts.join(', ')
 }
 
 let lastCellX = -1
@@ -183,21 +369,34 @@ function paintLine(x0: number, y0: number, x1: number, y1: number) {
 function onPointerDown(e: PointerEvent) {
   const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-cell]')
   if (!cell) return
+  const x = Number(cell.dataset.x)
+  const y = Number(cell.dataset.y)
+  if (tool.value === 'fill') {
+    floodFill(x, y)
+    return
+  }
+  if (tool.value === 'select') {
+    selection.value = { x0: x, y0: y, x1: x, y1: y }
+    selecting.value = true
+    try {
+      gridRef.value?.setPointerCapture?.(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
   painting.value = true
   try {
     gridRef.value?.setPointerCapture?.(e.pointerId)
   } catch {
     /* ignore */
   }
-  const x = Number(cell.dataset.x)
-  const y = Number(cell.dataset.y)
   lastCellX = x
   lastCellY = y
   paintCell(x, y)
 }
 
 function onPointerMove(e: PointerEvent) {
-  if (!painting.value) return
   const g = gridRef.value
   if (!g || !working.value) return
   const rect = g.getBoundingClientRect()
@@ -205,6 +404,15 @@ function onPointerMove(e: PointerEvent) {
   const x = Math.floor((e.clientX - rect.left) / cellSize.value)
   const y = Math.floor((e.clientY - rect.top) / cellSize.value)
   if (x < 0 || y < 0 || x >= working.value.width || y >= working.value.height) return
+  if (magnifier.value) {
+    hoverCell.value = { x, y }
+    hoverPos.value = { x: e.clientX, y: e.clientY }
+  }
+  if (selecting.value && selection.value) {
+    selection.value = { ...selection.value, x1: x, y1: y }
+    return
+  }
+  if (!painting.value) return
   if (x === lastCellX && y === lastCellY) return
   if (lastCellX >= 0 && lastCellY >= 0) paintLine(lastCellX, lastCellY, x, y)
   else paintCell(x, y)
@@ -315,7 +523,7 @@ function save() {
       <aside class="card h-fit space-y-4 p-4">
         <div>
           <label class="mb-1.5 block text-xs font-medium text-stone-500">工具</label>
-          <div class="grid grid-cols-3 gap-1.5">
+          <div class="grid grid-cols-5 gap-1.5">
             <button
               class="rounded-lg px-2 py-2 text-xs font-medium ring-1 transition"
               :class="tool === 'brush' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
@@ -336,6 +544,20 @@ function save() {
               @click="tool = 'pipette'"
             >
               💉 吸管
+            </button>
+            <button
+              class="rounded-lg px-2 py-2 text-xs font-medium ring-1 transition"
+              :class="tool === 'fill' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
+              @click="tool = 'fill'"
+            >
+              🪣 填充
+            </button>
+            <button
+              class="rounded-lg px-2 py-2 text-xs font-medium ring-1 transition"
+              :class="tool === 'select' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
+              @click="tool = 'select'"
+            >
+              ▦ 框选
             </button>
           </div>
         </div>
@@ -361,6 +583,22 @@ function save() {
             <option v-for="c in palette.colors" :key="c.code" :value="c.code">{{ c.code }} · {{ c.hex }}</option>
           </select>
         </div>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-stone-500">全局替换颜色（整张图纸）</label>
+          <div class="flex items-center gap-1.5">
+            <select v-model="replaceFrom" class="input !min-w-0 !flex-1 !px-1.5 !py-1 text-xs">
+              <option value="" disabled>源色号</option>
+              <option v-for="c in usedColors" :key="'rf' + c" :value="c">{{ c }}</option>
+            </select>
+            <span class="shrink-0 text-stone-400">→</span>
+            <select v-model="replaceTo" class="input !min-w-0 !flex-1 !px-1.5 !py-1 text-xs">
+              <option value="" disabled>目标色号</option>
+              <option v-for="c in palette.colors" :key="'rt' + c.code" :value="c.code">{{ c.code }}</option>
+            </select>
+            <button class="btn btn-secondary shrink-0 !px-2 !py-1 text-xs" @click="globalReplace">替换</button>
+          </div>
+          <p v-if="replaceMsg" class="mt-1 text-[11px] text-brand-600">{{ replaceMsg }}</p>
+        </div>
 
         <div class="space-y-2 text-xs text-stone-500">
           <label class="flex cursor-pointer items-center gap-2">
@@ -368,6 +606,18 @@ function save() {
           </label>
           <label class="flex cursor-pointer items-center gap-2">
             <input v-model="showCoords" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 坐标/参考线
+          </label>
+          <div class="flex gap-3">
+            <label class="flex cursor-pointer items-center gap-1.5">
+              <input v-model="symH" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 左右对称
+            </label>
+            <label class="flex cursor-pointer items-center gap-1.5">
+              <input v-model="symV" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 上下对称
+            </label>
+          </div>
+          <p v-if="symH || symV" class="text-[11px] leading-4 text-stone-400">开启后笔刷/橡皮会同时画到对称位置（中心对称=左右+上下同时开）。</p>
+          <label class="flex cursor-pointer items-center gap-2">
+            <input v-model="magnifier" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 放大镜（悬停查看局部）
           </label>
           <label v-if="showCoords" class="flex items-center gap-2">
             <span>底板</span>
@@ -385,6 +635,20 @@ function save() {
       </aside>
 
       <section class="card p-4">
+        <div
+          v-if="hasSelection"
+          class="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-700"
+        >
+          <span class="font-medium">框选：{{ selBounds()?.w }}×{{ selBounds()?.h }} 格</span>
+          <span v-if="selMsg" class="text-blue-500">{{ selMsg }}</span>
+          <div class="ml-auto flex flex-wrap gap-1.5">
+            <button class="rounded-md bg-white px-2 py-1 font-medium ring-1 ring-blue-200 hover:bg-blue-100" @click="copySelection">⧉ 复制</button>
+            <button class="rounded-md bg-white px-2 py-1 font-medium ring-1 ring-blue-200 hover:bg-blue-100" @click="cutSelection">✂ 剪切</button>
+            <button class="rounded-md bg-white px-2 py-1 font-medium ring-1 ring-blue-200 hover:bg-blue-100" :disabled="!clip" @click="pasteSelection">📋 粘贴</button>
+            <button class="rounded-md bg-white px-2 py-1 font-medium ring-1 ring-blue-200 hover:bg-blue-100" @click="deleteSelection">🗑 删除</button>
+            <button class="rounded-md bg-white px-2 py-1 font-medium ring-1 ring-blue-200 hover:bg-blue-100" @click="clearSelection">✕ 清除</button>
+          </div>
+        </div>
         <div v-if="tooBig" class="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-700">
           这张图纸有 {{ working.width }} × {{ working.height }} = {{ working.width * working.height }} 格，超过编辑器建议上限（9000 格）。
           <br />请到「图片转图纸」用更小的宽度重新生成，或在详情页直接下载使用。
@@ -434,7 +698,7 @@ function save() {
                     width: cellSize + 'px',
                     height: cellSize + 'px',
                     background: (() => { const code = working.rows[Math.floor(idx / working.width)]?.[idx % working.width]; return code && code !== '.' ? (colorMap.get(code)?.hex ?? '#fff') : 'rgba(0,0,0,0.04)' })(),
-                    boxShadow: cellFrameStyle(idx % working.width, Math.floor(idx / working.width))
+                    boxShadow: cellBoxShadow(idx % working.width, Math.floor(idx / working.width))
                   }"
                 >
                   <span
@@ -448,7 +712,26 @@ function save() {
             </div>
           </div>
         </div>
-        <p class="mt-2 text-xs text-stone-400">按住鼠标在格子上拖动可以连续涂色；编辑内容需要点击「保存」才会生效。</p>
+        <!-- 放大镜浮层 -->
+        <div
+          v-if="magnifier && hoverCell"
+          class="pointer-events-none fixed z-50 rounded-xl bg-white p-1.5 shadow-xl ring-1 ring-stone-200"
+          :style="{ left: (hoverPos.x + 16) + 'px', top: (hoverPos.y + 16) + 'px' }"
+        >
+          <div class="mb-1 px-1 text-[10px] font-medium text-stone-400">行 {{ hoverCell.y + 1 }} · 列 {{ hoverCell.x + 1 }}</div>
+          <div class="grid" :style="{ gridTemplateColumns: 'repeat(7, 18px)' }">
+            <template v-for="(row, dy) in magnifyCells" :key="'mr' + dy">
+              <div
+                v-for="(c, dx) in row"
+                :key="'mc' + dy + '-' + dx"
+                class="grid h-[18px] w-[18px] place-items-center text-[8px] font-bold"
+                :style="{ background: c.hex, color: c.code !== '.' ? contrastText(c.hex) : '#c9c9c9' }"
+              >{{ c.code === '.' ? '' : c.code }}</div>
+            </template>
+          </div>
+        </div>
+
+        <p class="mt-2 text-xs text-stone-400">按住鼠标在格子上拖动可以连续涂色；油漆桶点击填充连通区域；编辑内容需要点击「保存」才会生效。</p>
       </section>
     </div>
   </div>

@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -31,6 +31,8 @@ const mode = ref<GenMode>('nearest')
 const detail = ref(2) // 超采样倍数 1/2/3
 const enhance = ref(true) // 色彩增强
 const removeBg = ref(true) // 去除背景留空（默认开）
+const smartBg = ref(true) // 智能抠图：边缘连通去背景
+const borderTol = ref(30) // 抠图灵敏度（RGB 距离阈值）
 const bgThreshold = ref(18) // 背景阈值（CIEDE2000）
 const bgColor = ref('#FFFFFF') // 背景色
 const autoCrop = ref(true) // 自动裁剪空白边距
@@ -45,6 +47,10 @@ const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
 // 对比度（-50 ~ +50，0 不变）
 const contrast = ref(10)
+// 亮度（-50 ~ +50，0 不变）
+const brightness = ref(0)
+// 饱和度（0.5 ~ 2.0，1 不变；默认 1.3 增强）
+const saturate = ref(1.3)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
 const maxColors = ref(32)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
@@ -322,7 +328,7 @@ async function generate() {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
     if (srcRect) detailScore.value = estimateDetail(image.value.el, srcRect)
-    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0)
+    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? saturate.value : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0, brightness.value)
     // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
     const exclude =
       onlyOwnedColors.value && ownedColorCount.value > 0
@@ -335,6 +341,11 @@ async function generate() {
     if (removeBg.value) {
       const mask = buildBgMask(pixels, w, h, backgroundFromHex(bgColor.value, bgThreshold.value))
       finalRows = emptyOuterBackground(finalRows, mask)
+    }
+
+    // 智能抠图：从边缘泛洪去除连通背景（比纯色阈值更稳，主体贴边也可用）
+    if (smartBg.value) {
+      finalRows = emptyOuterBackground(finalRows, buildBorderBgMask(pixels, w, h, borderTol.value))
     }
 
     // 自动裁剪图案外的空白边距
@@ -377,6 +388,7 @@ async function generate() {
       createdAt: Date.now()
     }
     result.value = pat
+    remapPaletteId.value = paletteId.value
     // 预览格子自适应：大图默认用较小格子，避免一拖就变得很大
     previewCell.value = Math.max(6, Math.min(16, Math.floor(1000 / (outW + 1))))
     // 内容相同则复用已有图纸的 id（不新增重复）
@@ -392,6 +404,45 @@ function rename() {
   if (!result.value) return
   result.value.name = resultName.value || '我的拼豆图纸'
   store.savePattern(result.value)
+}
+
+/** A2：一键拼豆风 —— 预设一组适合卡通拼豆的参数并重新生成 */
+function applyBeadStyle() {
+  mode.value = 'nearest'
+  maxColors.value = 24
+  contrast.value = 20
+  saturate.value = 1.5
+  brightness.value = 0
+  sharpen.value = true
+  protectDark.value = true
+  denoise.value = true
+  outline.value = true
+  enhance.value = true
+  generate()
+}
+
+/** A5：一键切换品牌色卡并重新映射当前图纸 */
+const remapPaletteId = ref('')
+const brandMsg = ref('')
+function switchBrandPalette() {
+  if (!result.value) return
+  const target = getPalette(remapPaletteId.value)
+  if (!target) return
+  if (target.id === result.value.paletteId) {
+    brandMsg.value = '已经是这套色卡了'
+    setTimeout(() => (brandMsg.value = ''), 2500)
+    return
+  }
+  const converted = convertPatternPalette(result.value, palette.value, target)
+  result.value.rows = converted.rows
+  result.value.width = converted.width
+  result.value.height = converted.height
+  result.value.paletteId = target.id
+  paletteId.value = target.id
+  remapPaletteId.value = target.id
+  store.savePattern(result.value)
+  brandMsg.value = `已重新映射到「${target.title}」并保存到我的图纸`
+  setTimeout(() => (brandMsg.value = ''), 3500)
 }
 
 function downloadPNG(withCodes: boolean) {
@@ -630,11 +681,25 @@ function printA4() {
                 去杂点（清理孤立噪点）
               </label>
             </div>
-            <div>
-              <label class="mb-1.5 block text-xs font-medium text-stone-500">对比度：{{ contrast > 0 ? '+' : '' }}{{ contrast }}</label>
-              <input v-model.number="contrast" type="range" min="-50" max="50" step="1" class="w-full accent-brand-500" />
-              <div class="mt-1 flex justify-between text-[10px] text-stone-400"><span>-50</span><span>+50</span></div>
-              <p class="mt-1 text-[11px] text-stone-400">提高对比度让轮廓更清晰、颜色更分明。</p>
+            <div class="space-y-3">
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-stone-500">对比度：{{ contrast > 0 ? '+' : '' }}{{ contrast }}</label>
+                <input v-model.number="contrast" type="range" min="-50" max="50" step="1" class="w-full accent-brand-500" />
+                <div class="mt-1 flex justify-between text-[10px] text-stone-400"><span>-50</span><span>+50</span></div>
+                <p class="mt-1 text-[11px] text-stone-400">提高对比度让轮廓更清晰、颜色更分明。</p>
+              </div>
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-stone-500">亮度：{{ brightness > 0 ? '+' : '' }}{{ brightness }}</label>
+                <input v-model.number="brightness" type="range" min="-50" max="50" step="1" class="w-full accent-brand-500" />
+                <div class="mt-1 flex justify-between text-[10px] text-stone-400"><span>变暗</span><span>变亮</span></div>
+                <p class="mt-1 text-[11px] text-stone-400">整体调亮/调暗画面。</p>
+              </div>
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-stone-500">饱和度：{{ saturate.toFixed(2) }}</label>
+                <input v-model.number="saturate" type="range" min="0.5" max="2" step="0.05" class="w-full accent-brand-500" />
+                <div class="mt-1 flex justify-between text-[10px] text-stone-400"><span>0.5 灰</span><span>2.0 鲜艳</span></div>
+                <p class="mt-1 text-[11px] text-stone-400">颜色更鲜艳或更素；关闭「色彩增强」时按 1 计算。</p>
+              </div>
             </div>
           </div>
 
@@ -669,6 +734,15 @@ function printA4() {
                 <span class="w-6 text-right">{{ bgThreshold }}</span>
               </div>
               <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+                <input v-model="smartBg" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+                智能抠图（边缘连通去背景）
+              </label>
+              <div v-if="smartBg" class="flex items-center gap-2 text-xs text-stone-500">
+                <span class="shrink-0">抠图灵敏度</span>
+                <input v-model.number="borderTol" type="range" min="10" max="80" step="1" class="w-24 accent-brand-500" />
+                <span class="w-6 text-right">{{ borderTol }}</span>
+              </div>
+              <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
                 <input v-model="autoCrop" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
                 自动裁剪空白边距
               </label>
@@ -676,6 +750,9 @@ function printA4() {
             </div>
           </div>
 
+          <button class="btn btn-secondary w-full !py-2.5" :disabled="generating || !image" @click="applyBeadStyle">
+            ✨ 一键拼豆风（预设参数并重新生成）
+          </button>
           <button class="btn btn-primary w-full !py-2.5" :disabled="generating" @click="generate">
             <template v-if="!generating">⚡ 生成图纸</template>
             <template v-else>
@@ -719,6 +796,17 @@ function printA4() {
           </span>
         </div>
 
+        <div class="flex flex-wrap items-center gap-2 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">
+          <span class="font-medium">🔁 切换品牌色卡并重新映射：</span>
+          <select v-model="remapPaletteId" class="input !w-56 !py-1 text-xs">
+            <optgroup v-for="g in paletteGroups()" :key="g.label" :label="g.label">
+              <option v-for="p in g.items" :key="p.id" :value="p.id">{{ p.title }}（{{ p.count }} 色）</option>
+            </optgroup>
+          </select>
+          <button class="btn btn-primary !py-1 text-xs" @click="switchBrandPalette">重新映射并保存</button>
+          <span v-if="brandMsg" class="text-brand-600">{{ brandMsg }}</span>
+        </div>
+
                 <div v-if="isComplex && suggestedWidth > result.width" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
           当前输出仅 {{ result.width }} 豆宽，细节偏少。加大到 {{ suggestedWidth }} 豆宽（约 {{ Math.round(suggestedWidth / boardSize) }} 板）能显著提升精细度，人物五官更清晰。
           <button class="ml-1 font-medium text-amber-700 underline" @click="applySuggestion">加大并重新生成</button>
@@ -760,6 +848,17 @@ function printA4() {
           <button class="btn btn-secondary" @click="exportCSV">⇩ CSV 用豆统计</button>
           <button class="btn btn-secondary" @click="edit">✏️ 去编辑</button>
         </div>
+
+        <details open class="rounded-xl bg-stone-50 p-3">
+          <summary class="cursor-pointer text-xs font-medium text-stone-500">🧮 库存对照（这张图纸用多少豆 / 豆仓还差多少）</summary>
+          <div class="mt-3">
+            <ColorLegend :pattern="displayPattern!" :palette="palette" />
+            <p class="mt-2 text-[11px] leading-4 text-stone-400">
+              上表「需要」即这张图纸每种颜色要用多少颗豆；在「豆仓」登记库存后会显示够不够、还差几颗。
+              <router-link to="/warehouse" class="font-medium text-brand-500 hover:underline">去豆仓登记 →</router-link>
+            </p>
+          </div>
+        </details>
 
         <details open class="rounded-xl bg-stone-50 p-3">
           <summary class="cursor-pointer text-xs font-medium text-stone-500">🎨 颜色优化（合并相似色 / 去杂色 / 排除重映射）</summary>

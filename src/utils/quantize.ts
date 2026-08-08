@@ -346,7 +346,8 @@ export function imageToGridColors(
   sharpen = 0,
   contrast = 0,
   src?: { x: number; y: number; w: number; h: number } | null,
-  protectDark = 0.8
+  protectDark = 0.8,
+  brightness = 0
 ): Uint8ClampedArray {
   // Source region (in image coordinates). When nothing is cropped we use the full image.
   const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
@@ -432,6 +433,13 @@ export function imageToGridColors(
             b = b * (1 - strength) + minB * strength
           }
         }
+      }
+      // brightness: additive offset (-50..+50 -> +-127.5)
+      if (brightness !== 0) {
+        const off = brightness * 2.55
+        r += off
+        g += off
+        b += off
       }
       if (saturate !== 1) {
         const [sr, sg, sb] = boostSaturation(r, g, b, saturate)
@@ -752,11 +760,88 @@ export function buildTableExcluding(palette: BeadPalette, exclude?: Set<string> 
   return colors.map((c) => ({ code: c.code, hex: c.hex, lab: rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]) }))
 }
 
+/** 从四周边框像素估算背景色（平均色） */
+export function detectBorderColor(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+): [number, number, number] {
+  let r = 0
+  let g = 0
+  let b = 0
+  let n = 0
+  for (let x = 0; x < width; x++) {
+    for (const y of [0, height - 1]) {
+      const i = (y * width + x) * 4
+      r += pixels[i]
+      g += pixels[i + 1]
+      b += pixels[i + 2]
+      n++
+    }
+  }
+  for (let y = 1; y < height - 1; y++) {
+    for (const x of [0, width - 1]) {
+      const i = (y * width + x) * 4
+      r += pixels[i]
+      g += pixels[i + 1]
+      b += pixels[i + 2]
+      n++
+    }
+  }
+  if (n === 0) return [255, 255, 255]
+  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)]
+}
+
 /**
- * 跨品牌色卡转换：把一张图纸的色号按颜色最近匹配重新映射到目标色卡。
- * sourcePalette 为图纸当前使用的色卡（通常 getPalette(pattern.paletteId)）。
- * 返回新 Pattern（paletteId 改为目标色卡，rows 重新映射），不修改原图纸。
+ * 智能抠图：从四周边框与背景色相近的格子出发做泛洪（BFS），
+ * 把连通的背景区域标记出来（内部与背景同色的主体区域不会被去掉）。
  */
+export function buildBorderBgMask(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  tol: number
+): boolean[][] {
+  const bg = detectBorderColor(pixels, width, height)
+  const mask: boolean[][] = Array.from({ length: height }, () => new Array<boolean>(width).fill(false))
+  const dist = (i: number): number => {
+    const dr = pixels[i] - bg[0]
+    const dg = pixels[i + 1] - bg[1]
+    const db = pixels[i + 2] - bg[2]
+    return Math.sqrt(dr * dr + dg * dg + db * db)
+  }
+  const queue: [number, number][] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (y === 0 || y === height - 1 || x === 0 || x === width - 1) {
+        if (dist((y * width + x) * 4) <= tol) {
+          mask[y][x] = true
+          queue.push([x, y])
+        }
+      }
+    }
+  }
+  while (queue.length) {
+    const [cx, cy] = queue.pop()!
+    for (const [nx, ny] of [
+      [cx + 1, cy],
+      [cx - 1, cy],
+      [cx, cy + 1],
+      [cx, cy - 1]
+    ] as Array<[number, number]>) {
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height || mask[ny][nx]) continue
+      if (dist((ny * width + nx) * 4) <= tol) {
+        mask[ny][nx] = true
+        queue.push([nx, ny])
+      }
+    }
+  }
+  return mask
+}
+
+/** 跨品牌色卡转换：把一张图纸的色号按颜色最近匹配重新映射到目标色卡。
+ * sourcePalette 为图纸当前使用的色卡（通常 getPalette(pattern.paletteId)）。
+ * 返回新 Pattern（paletteId 改为目标色卡，rows 重新映射），不修改原图纸。 */
 export function convertPatternPalette(pattern: Pattern, sourcePalette: BeadPalette, targetPalette: BeadPalette): Pattern {
   const table = buildLabTable(targetPalette)
   const srcByCode = new Map<string, BeadColor>(sourcePalette.colors.map((c) => [c.code, c]))
