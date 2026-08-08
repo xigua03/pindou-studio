@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -42,6 +42,8 @@ const cropRect = ref<CropRect | null>(null)
 const contrast = ref(10)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
 const maxColors = ref(32)
+// 深色描边：把外边缘加深色轮廓（类似卡通描边）
+const outline = ref(false)
 // 仅用手头颜色（豆仓）
 const onlyOwnedColors = ref(false)
 // 底板尺寸（板数规划）
@@ -253,6 +255,11 @@ async function generate() {
     // 颜色数量上限：自动合并相似色，减少杂色、图案更干净（默认 32 色）
     if (maxColors.value > 0) {
       finalRows = limitColorCount(finalRows, palette.value, maxColors.value).rows
+    }
+
+    // 深色描边：外边缘统一加深色轮廓，轮廓更粗更完整
+    if (outline.value) {
+      finalRows = applyOutline(finalRows, palette.value)
     }
     const id = result.value?.id ?? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const pat: Pattern = {
@@ -478,6 +485,10 @@ function printA4() {
                 <option :value="48">48 色</option>
               </select>
               <p class="mt-1 text-[11px] text-stone-400">限制颜色数会自动合并相似色，去掉杂色，图案更干净好拼。</p>
+              <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+                <input v-model="outline" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+                深色描边（勾出轮廓）
+              </label>
             </div>
             <div>
               <label class="mb-1.5 block text-xs font-medium text-stone-500">对比度：{{ contrast > 0 ? '+' : '' }}{{ contrast }}</label>

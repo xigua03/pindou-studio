@@ -751,3 +751,42 @@ export function limitColorCount(
   }
   return current
 }
+
+/**
+ * 深色描边：把图案外边缘（紧邻空白/背景的格子）统一替换为色卡中最深的颜色。
+ * 让轮廓粗而完整（类似卡通描边效果），Hello Kitty 这类带黑边的图效果最佳。
+ * 返回新 rows（不修改原数组）。
+ */
+export function applyOutline(rows: string[][], palette: BeadPalette): string[][] {
+  const h = rows.length
+  const w = h > 0 ? rows[0].length : 0
+  if (h === 0 || w === 0) return rows
+  // 找色卡里最深的颜色
+  let darkest = palette.colors[0]
+  let minLum = Infinity
+  for (const c of palette.colors) {
+    const lum = 0.2126 * c.rgb[0] + 0.7152 * c.rgb[1] + 0.0722 * c.rgb[2]
+    if (lum < minLum) {
+      minLum = lum
+      darkest = c
+    }
+  }
+  const out = rows.map((r) => [...r])
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const c = out[y][x]
+      if (!c || c === '.') continue
+      const isEdge =
+        x === 0 ||
+        y === 0 ||
+        x === w - 1 ||
+        y === h - 1 ||
+        (rows[y][x - 1] ?? '.') === '.' ||
+        (rows[y][x + 1] ?? '.') === '.' ||
+        (rows[y - 1]?.[x] ?? '.') === '.' ||
+        (rows[y + 1]?.[x] ?? '.') === '.'
+      if (isEdge) out[y][x] = darkest.code
+    }
+  }
+  return out
+}
