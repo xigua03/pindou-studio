@@ -38,6 +38,10 @@ const sharpen = ref(true) // 边缘锐化
 // 上传前裁剪
 const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
+// 仅用手头颜色（豆仓）
+const onlyOwnedColors = ref(false)
+// 底板尺寸（板数规划）
+const boardSize = ref(29)
 // 颜色优化
 const mergeThreshold = ref(0)
 const noiseMin = ref(0)
@@ -81,6 +85,22 @@ const displayPattern = computed(() => {
 const usage = computed(() => (displayPattern.value ? computeColorUsage(displayPattern.value) : []))
 const totalBeads = computed(() => usage.value.reduce((s, u) => s + u.count, 0))
 const isSaved = computed(() => (result.value ? store.getPattern(result.value.id) !== undefined : false))
+
+/** 豆仓里已有库存的颜色数（用于「仅用手头颜色」提示） */
+const ownedColorCount = computed(() => {
+  const inv = store.state.inventory[paletteId.value]
+  return inv ? Object.keys(inv).filter((c) => (inv[c] ?? 0) > 0).length : 0
+})
+
+/** 底板规划：按所选底板尺寸计算需要几块板 */
+const boardInfo = computed(() => {
+  const pat = displayPattern.value
+  if (!pat) return null
+  const b = boardSize.value
+  const bx = Math.ceil(pat.width / b)
+  const by = Math.ceil(pat.height / b)
+  return { b, bx, by, total: bx * by }
+})
 
 const remapRows = computed(() => (result.value ? computeColorUsage(result.value) : []))
 const hasRemap = computed(() => Object.keys(remapMap.value).length > 0)
@@ -180,7 +200,12 @@ async function generate() {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
     const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? 1.3 : 1, sharpen.value ? 0.8 : 0, srcRect)
-    const { rows } = await quantizeImageAsync(pixels, w, h, palette.value, mode.value, (p) => (progress.value = p))
+    // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
+    const exclude =
+      onlyOwnedColors.value && ownedColorCount.value > 0
+        ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
+        : null
+    const { rows } = await quantizeImageAsync(pixels, w, h, palette.value, mode.value, (p) => (progress.value = p), undefined, exclude)
 
     // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）
     let finalRows = rows
@@ -339,6 +364,16 @@ function printA4() {
           </div>
 
           <div>
+            <label class="mb-1.5 block text-xs font-medium text-stone-500">底板尺寸（板数规划）</label>
+            <select v-model.number="boardSize" class="input !py-1.5">
+              <option :value="29">标准方板 29×29</option>
+              <option :value="50">大板 50×50</option>
+              <option :value="104">超大板 104×104</option>
+            </select>
+            <p class="mt-1 text-[11px] text-stone-400">生成后自动提示需要几块底板、怎么排布。</p>
+          </div>
+
+          <div>
             <label class="mb-1.5 block text-xs font-medium text-stone-500">配色算法</label>
             <div class="grid grid-cols-2 gap-2">
               <button
@@ -356,6 +391,11 @@ function printA4() {
                 抖动（细节丰富）
               </button>
             </div>
+            <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+              <input v-model="onlyOwnedColors" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+              仅用手头颜色（豆仓已有 {{ ownedColorCount }} 色）
+            </label>
+            <p class="mt-1 text-[11px] leading-4 text-stone-400">没有的颜色会被自动替换成豆仓里最近的颜色，保证图纸能直接拼。</p>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
@@ -452,6 +492,9 @@ function printA4() {
           <span>{{ usage.length }} 种颜色</span>
           <span>·</span>
           <span>共 {{ totalBeads }} 颗豆</span>
+          <span v-if="boardInfo" class="rounded-full bg-sky-50 px-2 py-0.5 text-sky-600">
+            📦 需 {{ boardInfo.total }} 块 {{ boardInfo.b }}×{{ boardInfo.b }} 板（{{ boardInfo.bx }}×{{ boardInfo.by }} 排布）
+          </span>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">

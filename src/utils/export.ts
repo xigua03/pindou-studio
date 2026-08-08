@@ -380,3 +380,98 @@ ${pages.join('\n')}
   w.focus()
   setTimeout(() => w.print(), 600)
 }
+
+/* ---------- 购物清单 ---------- */
+
+export interface ShoppingItem {
+  code: string
+  hex: string
+  count: number
+  owned: number
+  /** 需购数量 = max(0, 需要 - 已有)；未登记库存时视为 0 */
+  need: number
+  status: 'enough' | 'short' | 'none' | 'noData'
+}
+
+/** 根据图纸用量 + 豆仓库存计算采购清单（按需购数量从多到少排序） */
+export function computeShoppingList(
+  pattern: Pattern,
+  palette: BeadPalette,
+  ownedCount: (code: string) => number
+): ShoppingItem[] {
+  const byCode = new Map(palette.colors.map((c) => [c.code, c]))
+  const usage = computeColorUsage(pattern)
+  const list: ShoppingItem[] = usage.map((u) => {
+    const owned = ownedCount(u.code)
+    const need = Math.max(0, u.count - owned)
+    const status: ShoppingItem['status'] =
+      owned >= u.count ? 'enough' : owned > 0 ? 'short' : 'none'
+    return { code: u.code, hex: byCode.get(u.code)?.hex ?? '#cccccc', count: u.count, owned, need, status }
+  })
+  return list.sort((a, b) => b.need - a.need)
+}
+
+/** 打印版购物清单（新窗口，可直接打印/另存 PDF） */
+export function printShoppingList(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[]): void {
+  const totalNeed = items.reduce((s, i) => s + i.need, 0)
+  const rows = items
+    .map((i) => {
+      const badge =
+        i.status === 'enough'
+          ? '<span style="color:#16a34a">充足</span>'
+          : `<span style="color:${i.need > 0 ? '#ea580c' : '#6b7280'}">${i.need > 0 ? `需购 ${i.need}` : '刚好'}</span>`
+      return `<tr>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;"><span style="display:inline-block;width:18px;height:18px;background:${i.hex};border-radius:4px;border:1px solid #ddd;vertical-align:middle;margin-right:6px;"></span></td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;font-family:Consolas,monospace;">${i.code}</td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;">${i.count}</td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;">${i.owned}</td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;text-align:right;font-weight:600;">${i.need}</td>
+        <td style="padding:5px 10px;border:1px solid #e5e5e5;">${badge}</td>
+      </tr>`
+    })
+    .join('')
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>${pattern.name} · 购物清单</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #333; margin: 0; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .meta { color: #999; font-size: 12px; margin-bottom: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { background: #fafafa; padding: 6px 10px; border: 1px solid #e5e5e5; text-align: left; }
+  td { text-align: left; }
+  .total { margin-top: 12px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>🛒 购物清单 · ${pattern.name}</h1>
+  <div class="meta">${pattern.width}×${pattern.height} 格 · 色卡 ${palette.title} · 共 ${pattern.rows.reduce((s, r) => s + r.filter((c) => c && c !== '.').length, 0)} 颗豆</div>
+  <table>
+    <tr><th>颜色</th><th>色号</th><th style="text-align:right">需要</th><th style="text-align:right">已有</th><th style="text-align:right">需购</th><th>状态</th></tr>
+    ${rows}
+  </table>
+  <p class="total">共需补购 <b style="color:#ea580c">${totalNeed}</b> 颗豆子（未登记库存的按 0 计算）</p>
+</body>
+</html>`
+  const w = window.open('', '_blank', 'width=900,height=1000')
+  if (!w) return
+  w.document.write(html)
+  w.document.close()
+  w.focus()
+  setTimeout(() => w.print(), 500)
+}
+
+/** 购物清单 CSV */
+export function exportShoppingCSV(pattern: Pattern, palette: BeadPalette, items: ShoppingItem[]): string {
+  const lines = ['色号,颜色,需要,已有,需购,状态']
+  for (const i of items) {
+    const status = i.status === 'enough' ? '库存充足' : i.status === 'short' ? '部分缺少' : i.status === 'none' ? '未持有' : '未登记'
+    lines.push(`${i.code},${i.hex},${i.count},${i.owned},${i.need},${status}`)
+  }
+  lines.push('')
+  lines.push(`合计需购,${items.reduce((s, i) => s + i.need, 0)},,,,`)
+  return '\uFEFF' + lines.join('\r\n')
+}

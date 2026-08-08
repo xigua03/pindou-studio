@@ -215,14 +215,15 @@ async function clickByText(page, text) {
     body = await page.evaluate(() => document.body.innerText)
     console.log(paint && body.includes('已保存') ? 'PASS  编辑器涂色+保存' : 'FAIL  编辑器涂色+保存')
 
-    // ⑥ 撤销 / 重做（先跳走再跳回，强制整页重载拿到干净的编辑器实例，用空格 (0,1) 做确定性测试）
+    // ⑥ 撤销 / 重做（用未被其他用例碰过的 builtin-apple，首次进入副本=原始状态，结果确定）
     await page.goto(BASE + '#/', { waitUntil: 'networkidle0' })
-    await page.goto(BASE + '#/editor/builtin-heart', { waitUntil: 'networkidle0' })
-    await new Promise((r) => setTimeout(r, 600))
+    await new Promise((r) => setTimeout(r, 400))
+    await page.goto(BASE + '#/editor/builtin-apple', { waitUntil: 'networkidle0' })
+    await new Promise((r) => setTimeout(r, 700))
     const countCells = () =>
       page.evaluate(() => [...document.querySelectorAll('[data-cell]')].filter((c) => (c.innerText || '').trim() !== '').length)
     const cellsN = await countCells()
-    await page.evaluate(() => {
+    const cellOk = await page.evaluate(() => {
       const cell = document.querySelector('[data-x="1"][data-y="0"]')
       if (!cell) return false
       cell.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2 }))
@@ -238,7 +239,7 @@ async function clickByText(page, text) {
     await new Promise((r) => setTimeout(r, 400))
     const cellsRedo = await countCells()
     console.log(
-      cellsPainted === cellsN + 1 && cellsUndo === cellsN && cellsRedo === cellsN + 1
+      cellOk && cellsPainted === cellsN + 1 && cellsUndo === cellsN && cellsRedo === cellsN + 1
         ? 'PASS  撤销/重做'
         : 'FAIL  撤销/重做（N=' + cellsN + ' painted=' + cellsPainted + ' undo=' + cellsUndo + ' redo=' + cellsRedo + '）'
     )
@@ -277,6 +278,85 @@ async function clickByText(page, text) {
     body = await page.evaluate(() => document.body.innerText)
     const importMsgOk = body.includes('已导入')
     console.log(previewOk && importMsgOk ? 'PASS  导入图纸（色号网格）' : 'FAIL  导入图纸（preview=' + previewOk + ' importMsg=' + importMsgOk + '）')
+
+    // ⑨ 拼豆进度追踪：详情页开启拼豆模式 → 点一格 → 进度+1，刷新后保留
+    await page.goto(BASE + '#/pattern/builtin-heart', { waitUntil: 'networkidle0' })
+    await new Promise((r) => setTimeout(r, 500))
+    const boardHint = await page.evaluate(() => document.body.innerText.includes('📦'))
+    await clickByText(page, '拼豆模式')
+    await new Promise((r) => setTimeout(r, 400))
+    await page.evaluate(() => {
+      const cell = document.querySelector('.grid-cell')
+      if (cell) cell.click()
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    const progAfter = await page.evaluate(() => {
+      const m = document.body.innerText.match(/已完成\s*(\d+)\/(\d+)/)
+      return m ? { done: Number(m[1]), total: Number(m[2]) } : null
+    })
+    await page.reload({ waitUntil: 'networkidle0' })
+    await new Promise((r) => setTimeout(r, 600))
+    await clickByText(page, '拼豆模式')
+    await new Promise((r) => setTimeout(r, 300))
+    const progPersist = await page.evaluate(() => {
+      const m = document.body.innerText.match(/已完成\s*(\d+)\/(\d+)/)
+      return m ? Number(m[1]) : -1
+    })
+    console.log(
+      boardHint && progAfter && progAfter.done === 1 && progPersist === 1
+        ? 'PASS  拼豆进度追踪（' + (progAfter ? progAfter.done + '/' + progAfter.total : '?') + '，刷新后保留）'
+        : 'FAIL  拼豆进度（boardHint=' + boardHint + ' after=' + JSON.stringify(progAfter) + ' persist=' + progPersist + '）'
+    )
+
+    // ⑩ 换色卡：详情页转换到另一套色卡并保存副本
+    await clickByText(page, '换色卡')
+    await new Promise((r) => setTimeout(r, 300))
+    const convertSelOk = await page.evaluate(() => {
+      const sel = document.querySelector('select')
+      if (!sel || sel.options.length < 2) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set
+      setter.call(sel, sel.options[1].value)
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    })
+    await clickByText(page, '转换并保存副本')
+    await new Promise((r) => setTimeout(r, 1200))
+    const urlAfterConvert = page.url()
+    const convertBody = await page.evaluate(() => document.body.innerText)
+    const convertOk = convertSelOk && urlAfterConvert.includes('/pattern/') && !urlAfterConvert.includes('builtin-heart') && convertBody.includes('我的图纸')
+    console.log(convertOk ? 'PASS  换色卡生成副本并跳转' : 'FAIL  换色卡（sel=' + convertSelOk + ' url=' + urlAfterConvert + '）')
+
+    // ⑪ 购物清单：弹出打印窗口包含需购
+    let shopOk = false
+    const shopPopup = new Promise((res) => page.once('popup', (p) => res(p)))
+    await clickByText(page, '购物清单')
+    try {
+      const popup = await Promise.race([shopPopup, new Promise((_, rej) => setTimeout(() => rej(new Error('no popup')), 5000))])
+      await new Promise((r) => setTimeout(r, 1000))
+      const popupText = await popup.evaluate(() => document.body.innerText)
+      shopOk = popupText.includes('需购') && popupText.includes('色号')
+      try { await popup.close() } catch { /* ignore */ }
+    } catch { shopOk = false }
+    console.log(shopOk ? 'PASS  购物清单导出（含需购）' : 'FAIL  购物清单导出')
+
+    // ⑫ 仅用手头颜色生成：生成器勾选后仍能生成成功
+    await page.goto(BASE + '#/generator', { waitUntil: 'networkidle0' })
+    const input3 = await page.$('input[type=file]')
+    await input3.uploadFile(TEST_IMG)
+    await new Promise((r) => setTimeout(r, 800))
+    const ownedToggle = await page.evaluate(() => {
+      const cb = [...document.querySelectorAll('input[type=checkbox]')].find((x) =>
+        (x.closest('label')?.innerText || '').includes('仅用手头颜色')
+      )
+      if (!cb) return false
+      cb.click()
+      return true
+    })
+    await clickByText(page, '生成图纸')
+    await new Promise((r) => setTimeout(r, 3000))
+    body = await page.evaluate(() => document.body.innerText)
+    const ownedGenOk = ownedToggle && (body.includes('已保存在') || body.includes('种颜色'))
+    console.log(ownedGenOk ? 'PASS  仅用手头颜色生成' : 'FAIL  仅用手头颜色生成（toggle=' + ownedToggle + '）')
 
     await browser.close()
     console.log(errors.length ? '\nERRORS:\n  ' + errors.join('\n  ') : '\nNo console/page errors.')

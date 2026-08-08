@@ -12,9 +12,17 @@ const props = withDefaults(
     grid?: boolean
     emptyBg?: string
     forceCanvas?: boolean
+    /** 拼豆进度：已完成格子的 key 集合（key = `${x},${y}`） */
+    progress?: Set<string> | null
+    /** 允许点击格子（用于拼豆进度标记） */
+    clickable?: boolean
   }>(),
-  { cellSize: 18, showCodes: false, grid: true, emptyBg: 'rgba(0,0,0,0.045)', forceCanvas: false }
+  { cellSize: 18, showCodes: false, grid: true, emptyBg: 'rgba(0,0,0,0.045)', forceCanvas: false, progress: null, clickable: false }
 )
+
+const emit = defineEmits<{
+  (e: 'cell-click', x: number, y: number): void
+}>()
 
 const colorMap = computed(() => new Map(props.palette.colors.map((c) => [c.code, c])))
 
@@ -30,7 +38,7 @@ const cells = computed(() => {
       list.push({
         code,
         hex: colorMap.value.get(code)?.hex ?? '#ffffff',
-        key: `${x}-${y}`
+        key: `${x},${y}`
       })
     }
   }
@@ -85,9 +93,17 @@ function drawCanvas() {
       }
     }
   }
+  // 拼豆进度：已完成格子盖半透明白
+  if (props.progress && props.progress.size > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    for (const key of props.progress) {
+      const [gx, gy] = key.split(',').map(Number)
+      if (Number.isFinite(gx) && Number.isFinite(gy)) ctx.fillRect(gx * cell, gy * cell, cell, cell)
+    }
+  }
 }
 
-watch([() => props.pattern, () => props.palette, () => props.cellSize, () => props.showCodes, () => props.grid], () => {
+watch([() => props.pattern, () => props.palette, () => props.cellSize, () => props.showCodes, () => props.grid, () => props.progress], () => {
   if (useCanvas.value) drawCanvas()
 })
 onMounted(() => {
@@ -106,7 +122,8 @@ onMounted(() => {
     <div
       v-for="c in cells"
       :key="c.key"
-      class="grid-cell"
+      class="grid-cell relative"
+      :class="clickable ? 'cursor-pointer' : ''"
       :style="{
         width: cellSize + 'px',
         height: cellSize + 'px',
@@ -115,8 +132,13 @@ onMounted(() => {
         fontSize: fontSize + 'px',
         boxShadow: grid && c.code && c.code !== '.' ? 'inset 0 0 0 0.5px rgba(0,0,0,0.12)' : 'none'
       }"
+      @click="clickable ? emit('cell-click', Number(c.key.split(',')[0]), Number(c.key.split(',')[1])) : undefined"
     >
-      {{ showCodes && c.code && c.code !== '.' ? (c.code.length > 2 ? c.code.slice(0, 2) : c.code) : '' }}
+      <span v-if="showCodes && c.code && c.code !== '.'">{{ c.code.length > 2 ? c.code.slice(0, 2) : c.code }}</span>
+      <span
+        v-if="progress && progress.has(c.key)"
+        class="absolute inset-0 grid place-items-center bg-white/55 text-[10px] leading-none text-green-600"
+      >✓</span>
     </div>
   </div>
 </template>

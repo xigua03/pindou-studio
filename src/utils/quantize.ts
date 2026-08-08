@@ -56,11 +56,12 @@ export function quantizeImage(
   palette: BeadPalette,
   mode: GenMode,
   onProgress?: (p: number) => void,
-  background?: BackgroundConfig | null
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
 ): { rows: string[][]; used: Set<string> } {
-  if (mode === 'floyd') return quantizeImageFloyd(pixels, width, height, palette, onProgress, background)
+  if (mode === 'floyd') return quantizeImageFloyd(pixels, width, height, palette, onProgress, background, exclude)
 
-  const table = buildLabTable(palette)
+  const table = buildTableExcluding(palette, exclude)
   const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
   const th = background?.threshold ?? 0
   const rows: string[][] = []
@@ -91,9 +92,10 @@ export function quantizeImageFloyd(
   height: number,
   palette: BeadPalette,
   onProgress?: (p: number) => void,
-  background?: BackgroundConfig | null
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
 ): { rows: string[][]; used: Set<string> } {
-  const table = buildLabTable(palette)
+  const table = buildTableExcluding(palette, exclude)
   const byCode = new Map<string, BeadColor>(palette.colors.map((c) => [c.code, c]))
   const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
   const th = background?.threshold ?? 0
@@ -202,10 +204,11 @@ export async function quantizeImageAsync(
   palette: BeadPalette,
   mode: GenMode,
   onProgress?: (p: number) => void,
-  background?: BackgroundConfig | null
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
 ): Promise<{ rows: string[][]; used: Set<string> }> {
-  if (mode === 'floyd') return quantizeImageFloydAsync(pixels, width, height, palette, onProgress, background)
-  const table = buildLabTable(palette)
+  if (mode === 'floyd') return quantizeImageFloydAsync(pixels, width, height, palette, onProgress, background, exclude)
+  const table = buildTableExcluding(palette, exclude)
   const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
   const th = background?.threshold ?? 0
   const rows: string[][] = []
@@ -239,9 +242,10 @@ async function quantizeImageFloydAsync(
   height: number,
   palette: BeadPalette,
   onProgress?: (p: number) => void,
-  background?: BackgroundConfig | null
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
 ): Promise<{ rows: string[][]; used: Set<string> }> {
-  const table = buildLabTable(palette)
+  const table = buildTableExcluding(palette, exclude)
   const byCode = new Map<string, BeadColor>(palette.colors.map((c) => [c.code, c]))
   const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
   const th = background?.threshold ?? 0
@@ -677,4 +681,42 @@ export function nearestUsedCode(
     }
   }
   return best || null
+}
+
+/** 构建最近色表；可排除指定色号（如"只用豆仓里的颜色"）。若全部被排除则回退到完整色表。 */
+export function buildTableExcluding(palette: BeadPalette, exclude?: Set<string> | null): LabColor[] {
+  const colors =
+    exclude && exclude.size > 0 ? palette.colors.filter((c) => !exclude.has(c.code)) : palette.colors
+  if (colors.length === 0) return buildLabTable(palette)
+  return colors.map((c) => ({ code: c.code, hex: c.hex, lab: rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]) }))
+}
+
+/**
+ * 跨品牌色卡转换：把一张图纸的色号按颜色最近匹配重新映射到目标色卡。
+ * sourcePalette 为图纸当前使用的色卡（通常 getPalette(pattern.paletteId)）。
+ * 返回新 Pattern（paletteId 改为目标色卡，rows 重新映射），不修改原图纸。
+ */
+export function convertPatternPalette(pattern: Pattern, sourcePalette: BeadPalette, targetPalette: BeadPalette): Pattern {
+  const table = buildLabTable(targetPalette)
+  const srcByCode = new Map<string, BeadColor>(sourcePalette.colors.map((c) => [c.code, c]))
+  const cache = new Map<string, string>()
+  const mapCode = (code: string): string => {
+    if (code === '.' || code === '') return code
+    const hit = cache.get(code)
+    if (hit) return hit
+    // 若目标色卡本身就有该色号，直接保留
+    if (targetPalette.colors.some((c) => c.code === code)) {
+      cache.set(code, code)
+      return code
+    }
+    const c = srcByCode.get(code)
+    let mapped = code
+    if (c) {
+      mapped = nearestCode(rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]), table)
+    }
+    cache.set(code, mapped)
+    return mapped
+  }
+  const rows = pattern.rows.map((r) => r.map(mapCode))
+  return { ...pattern, paletteId: targetPalette.id, rows }
 }
