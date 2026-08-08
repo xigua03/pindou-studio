@@ -192,49 +192,88 @@ function downloadBoardLayout() {
 }
 
 const SHARE_MAP_KEY = 'share_map'
+const PATTERN_SHARE_KEY = 'pattern_share'
+const SHARE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 const shareId = ref('')
 const shareErr = ref('')
 const shareOk = ref(false)
+const shareHint = ref('')
 
-function loadShareMap(): Record<string, { name: string; paletteId: string; rows: string[][]; tags: string[]; createdAt: number }> {
+interface ShareEntry {
+  name: string
+  paletteId: string
+  rows: string[][]
+  tags: string[]
+  createdAt: number
+  patternKey: string
+}
+function loadShareMap(): Record<string, ShareEntry> {
   return loadJSON(SHARE_MAP_KEY, {})
+}
+function loadPatternShare(): Record<string, string> {
+  return loadJSON(PATTERN_SHARE_KEY, {})
 }
 function randomShareId() {
   const map = loadShareMap()
   let id = ''
   do {
-    id = String(Math.floor(10000 + Math.random() * 90000))
+    id = Array.from({ length: 5 }, () => SHARE_ALPHABET[Math.floor(Math.random() * SHARE_ALPHABET.length)]).join('')
   } while (map[id])
   shareId.value = id
 }
 function openShare() {
+  if (!pattern.value) return
   shareErr.value = ''
-  shareOk.value = false
-  randomShareId()
+  shareHint.value = ''
+  const patternShare = loadPatternShare()
+  const existingId = patternShare[pattern.value.id]
+  const map = loadShareMap()
+  if (existingId && map[existingId]) {
+    // 该图纸已生成过链接：直接显示已有链接，不让用户重复生成
+    shareId.value = existingId
+    shareUrl.value = `${location.origin}${location.pathname}#/share/${existingId}`
+    shareOk.value = true
+  } else {
+    shareOk.value = false
+    randomShareId()
+  }
   showShare.value = true
+}
+function modifyShare() {
+  shareOk.value = false
+  shareErr.value = ''
+  shareHint.value = '重新生成后，原来的链接会立即失效'
 }
 function generateShare() {
   if (!pattern.value) return
   const id = shareId.value.trim()
-  if (!/^\d{1,5}$/.test(id)) {
-    shareErr.value = '编号只能是 1-5 位数字，请重新输入'
+  if (!/^[A-Za-z0-9]{5}$/.test(id)) {
+    shareErr.value = '编号需为 5 位，可由大小写字母和数字组成'
     return
   }
   const map = loadShareMap()
-  if (map[id]) {
+  const patternShare = loadPatternShare()
+  const oldId = patternShare[pattern.value.id]
+  if (map[id] && map[id].patternKey !== pattern.value.id) {
     shareErr.value = `该链接已存在（${id}），请换一个编号`
     return
   }
+  // 生成新链接时让旧链接立即失效（同一张图纸只保留一个有效链接）
+  if (oldId && oldId !== id && map[oldId]) delete map[oldId]
   map[id] = {
     name: pattern.value.name,
     paletteId: pattern.value.paletteId,
     rows: pattern.value.rows.map((r) => [...r]),
     tags: pattern.value.tags ?? [],
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    patternKey: pattern.value.id
   }
+  patternShare[pattern.value.id] = id
   saveJSON(SHARE_MAP_KEY, map)
+  saveJSON(PATTERN_SHARE_KEY, patternShare)
   shareUrl.value = `${location.origin}${location.pathname}#/share/${id}`
   shareErr.value = ''
+  shareHint.value = ''
   shareOk.value = true
   shareCopied.value = false
 }
@@ -315,9 +354,10 @@ function edit() {
       pattern.value.tags
     )
     target.description = pattern.value.description
-    store.savePattern(target)
   }
-  router.push(`/editor/${target.id}`)
+  // savePattern 会按内容去重并返回实际存储的 id，必须用返回值跳转，否则可能指向未保存的图纸
+  const savedId = store.savePattern(target)
+  router.push(`/editor/${savedId}`)
 }
 
 function remove() {
@@ -546,7 +586,7 @@ function remove() {
         <h3 class="text-base font-semibold text-stone-800">🔗 分享图纸 · {{ pattern.name }}</h3>
         <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="showShare = false">✕</button>
       </div>
-      <p class="mt-1 text-xs leading-5 text-stone-500">生成一个短链接发给别人，对方打开即可查看图纸。编号为 1-5 位数字，可以自定义。</p>
+      <p class="mt-1 text-xs leading-5 text-stone-500">生成一个短链接发给别人，对方打开即可查看并下载。编号为 5 位，可由大小写字母和数字组成。</p>
       <div v-if="!shareOk" class="mt-3 flex flex-wrap items-center gap-2">
         <div class="flex flex-1 items-center overflow-hidden rounded-xl ring-1 ring-stone-200 focus-within:ring-2 focus-within:ring-brand-400">
           <span class="shrink-0 pl-3 text-xs text-stone-400">#/share/</span>
@@ -554,7 +594,6 @@ function remove() {
             v-model="shareId"
             class="w-full min-w-0 border-0 bg-transparent px-1 py-2 font-mono text-sm text-stone-800 outline-none placeholder:text-stone-300"
             maxlength="5"
-            inputmode="numeric"
             placeholder="编号"
             @keydown.enter="generateShare"
           />
@@ -563,11 +602,13 @@ function remove() {
         <button class="btn btn-primary !py-2 text-xs" @click="generateShare">生成链接</button>
       </div>
       <p v-if="shareErr" class="mt-2 text-xs text-red-500">{{ shareErr }}</p>
+      <p v-if="shareHint" class="mt-2 text-xs text-amber-600">{{ shareHint }}</p>
       <template v-if="shareOk">
         <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
       </template>
       <div class="mt-4 flex flex-wrap gap-2">
         <button v-if="shareOk" class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>
+        <button v-if="shareOk" class="btn btn-secondary" @click="modifyShare">✎ 修改编号</button>
         <button class="btn btn-secondary" @click="showShare = false">关闭</button>
       </div>
     </div>

@@ -8,6 +8,7 @@ import ColorLegend from '../components/ColorLegend.vue'
 import {
   computeColorUsage,
   patternToCanvas,
+  renderPatternSheet,
   downloadCanvas,
   exportUsageCSV,
   downloadText,
@@ -49,8 +50,8 @@ function entryToPattern(raw: ShareEntry, token: string): Pattern | null {
 const pattern = computed<Pattern | null>(() => {
   const token = String(route.params.token ?? '')
   if (!token) return null
-  // 新短链接：#/share/<1-5位数字>，从本机已生成的分享映射里读取
-  if (/^\d{1,5}$/.test(token)) {
+  // 新短链接：#/share/<5位字母数字>，从本机已生成的分享映射里读取
+  if (/^[A-Za-z0-9]{5}$/.test(token)) {
     const map = loadJSON<Record<string, ShareEntry>>('share_map', {})
     const entry = map[token]
     if (!entry) return null
@@ -91,6 +92,11 @@ function exportCSV() {
     'text/csv;charset=utf-8'
   )
 }
+function downloadSheet() {
+  if (!pattern.value || !palette.value) return
+  const canvas = renderPatternSheet(pattern.value, palette.value, { showCoords: true, boardSize: 29 })
+  downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-图纸+色号统计.png`)
+}
 </script>
 
 <template>
@@ -115,6 +121,7 @@ function exportCSV() {
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-secondary" @click="downloadPNG(false)">⬇ 下载图</button>
         <button class="btn btn-secondary" @click="downloadPNG(true)">⬇ 色号版</button>
+        <button class="btn btn-secondary" @click="downloadSheet">🖨 图纸+色号统计</button>
         <button class="btn btn-secondary" @click="exportCSV">⇩ CSV</button>
         <router-link to="/" class="btn btn-primary">去图纸库</router-link>
       </div>

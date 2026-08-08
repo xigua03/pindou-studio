@@ -25,9 +25,9 @@ const filtered = computed(() => {
   })
 })
 
-// 分页：默认每页 14 张，可切换每页数量；筛选变化时回到第 1 页
-const pageSizeOptions = [14, 20, 28, 40]
-const pageSize = ref(14)
+// 分页：默认每页 16 张，可切换每页数量；筛选变化时回到第 1 页
+const pageSizeOptions = [16, 24, 32, 48]
+const pageSize = ref(16)
 const page = ref(1)
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const pagedList = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))

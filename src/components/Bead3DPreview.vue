@@ -6,6 +6,7 @@ const props = defineProps<{ pattern: Pattern; palette: BeadPalette }>()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const tilt = ref(55)
 const cell = ref(16)
+const zoom = ref(1)
 
 const byCode = computed(() => new Map(props.palette.colors.map((c) => [c.code, c])))
 
@@ -27,7 +28,7 @@ function render() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const p = props.pattern
-  const cs = cell.value
+  const cs = cell.value * zoom.value
   const rad = (cs * 0.9) / 2
   const scaleY = Math.cos((tilt.value * Math.PI) / 180)
   const pad = cs * 1.8
@@ -87,6 +88,15 @@ function render() {
   ctx.restore()
 }
 
+function downloadPNG() {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const a = document.createElement('a')
+  a.href = canvas.toDataURL('image/png')
+  a.download = `${props.pattern.name}-3D预览.png`
+  a.click()
+}
+
 onMounted(() => {
   // 大图纸自动缩小豆子，保证整张图能在预览区里完整看到
   const max = Math.max(props.pattern.width, props.pattern.height)
@@ -95,7 +105,7 @@ onMounted(() => {
   }
   render()
 })
-watch([() => props.pattern, () => props.palette, tilt, cell], render, { deep: true })
+watch([() => props.pattern, () => props.palette, tilt, cell, zoom], render, { deep: true })
 </script>
 
 <template>
@@ -111,6 +121,12 @@ watch([() => props.pattern, () => props.palette, tilt, cell], render, { deep: tr
         <input v-model.number="cell" type="range" min="8" max="28" step="1" class="w-32 accent-brand-500" />
         <span class="w-8 text-right">{{ cell }}px</span>
       </label>
+      <label class="flex items-center gap-2">
+        缩放
+        <input v-model.number="zoom" type="range" min="0.5" max="3" step="0.1" class="w-32 accent-brand-500" />
+        <span class="w-10 text-right">{{ Math.round(zoom * 100) }}%</span>
+      </label>
+      <button class="btn btn-primary !px-3 !py-1.5 text-xs" @click="downloadPNG">⬇ 下载图片</button>
       <span class="ml-auto text-stone-400">{{ pattern.width }}×{{ pattern.height }} 格 · {{ palette.title }}</span>
     </div>
     <div class="overflow-auto rounded-xl bg-stone-100 p-3" style="max-height: 66vh">

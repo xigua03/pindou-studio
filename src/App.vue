@@ -12,21 +12,21 @@ watch(
 )
 
 const navs = [
-  { to: '/', label: '图纸库' },
-  { to: '/generator', label: '图片转图纸' },
-  { to: '/palette', label: '色卡' },
-  { to: '/warehouse', label: '豆仓' },
-  { to: '/mine', label: '我的' }
+  { to: '/', label: '图纸库', icon: '🏠' },
+  { to: '/generator', label: '图片转图纸', icon: '🖼️' },
+  { to: '/palette', label: '色卡', icon: '🎨' },
+  { to: '/warehouse', label: '豆仓', icon: '📦' },
+  { to: '/mine', label: '我的', icon: '🙋' }
 ]
 </script>
 
 <template>
   <div class="flex min-h-screen flex-col">
     <header class="no-print sticky top-0 z-40 border-b border-stone-200/70 bg-white/85 backdrop-blur">
-      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
-        <router-link to="/" class="flex items-center gap-2">
-          <span class="grid h-8 w-8 place-items-center rounded-xl bg-brand-500 text-lg text-white shadow-sm">🧩</span>
-          <span class="text-lg font-bold tracking-wide text-stone-800">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4">
+        <router-link to="/" class="flex shrink-0 items-center gap-2.5">
+          <span class="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-xl text-white shadow-sm">🧩</span>
+          <span class="text-xl font-bold tracking-wide text-stone-800">
             拼豆<span class="text-brand-500">工坊</span>
           </span>
         </router-link>
@@ -36,9 +36,10 @@ const navs = [
             v-for="n in navs"
             :key="n.to"
             :to="n.to"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-stone-600 transition hover:bg-brand-50 hover:text-brand-600"
+            class="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[15px] font-medium text-stone-600 transition hover:bg-brand-50 hover:text-brand-600"
             active-class="!text-brand-600 !bg-brand-50 font-semibold"
           >
+            <span class="text-base leading-none">{{ n.icon }}</span>
             {{ n.label }}
           </router-link>
         </nav>
@@ -55,8 +56,9 @@ const navs = [
           v-for="n in navs"
           :key="n.to"
           :to="n.to"
-          class="block rounded-lg px-3 py-2 text-sm font-medium text-stone-700 hover:bg-brand-50 hover:text-brand-600"
+          class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[15px] font-medium text-stone-700 hover:bg-brand-50 hover:text-brand-600"
         >
+          <span class="text-base leading-none">{{ n.icon }}</span>
           {{ n.label }}
         </router-link>
       </div>
