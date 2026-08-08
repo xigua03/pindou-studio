@@ -12,9 +12,13 @@ const selected = ref<string[]>([])
 
 // ---------- 分组 ----------
 const activeGroup = ref<'all' | 'none' | string>('all')
-const newGroupName = ref('')
 const groupMenuId = ref<string | null>(null)
 const batchGroupId = ref('')
+// 新建 / 重命名分组弹窗
+const groupModal = ref(false)
+const groupModalMode = ref<'create' | 'rename'>('create')
+const groupModalName = ref('')
+const groupModalId = ref<string | null>(null)
 
 const inGroup = (groupId: string, patternId: string) =>
   store.state.groups.find((g) => g.id === groupId)?.patternIds.includes(patternId) ?? false
@@ -33,12 +37,28 @@ function togglePatternInGroup(g: { id: string }, p: { id: string }) {
   if (inGroup(g.id, p.id)) store.removeFromGroup(g.id, p.id)
   else store.addToGroup(g.id, p.id)
 }
-function createGroup() {
-  const name = newGroupName.value.trim()
+function openCreateGroup() {
+  groupModalMode.value = 'create'
+  groupModalName.value = ''
+  groupModalId.value = null
+  groupModal.value = true
+}
+function openRenameGroup(g: { id: string; name: string }) {
+  groupModalMode.value = 'rename'
+  groupModalName.value = g.name
+  groupModalId.value = g.id
+  groupModal.value = true
+}
+function submitGroupModal() {
+  const name = groupModalName.value.trim()
   if (!name) return
-  store.createGroup(name)
-  newGroupName.value = ''
-  activeGroup.value = 'all'
+  if (groupModalMode.value === 'create') {
+    store.createGroup(name)
+    activeGroup.value = 'all'
+  } else if (groupModalId.value) {
+    store.renameGroup(groupModalId.value, name)
+  }
+  groupModal.value = false
 }
 function deleteGroup(g: { id: string; name: string }) {
   if (confirm(`确定删除分组「${g.name}」吗？图纸不会被删除，只是移出该分组。`)) {
@@ -215,7 +235,7 @@ function doImport() {
   <div class="space-y-5">
     <div>
       <h1 class="text-xl font-bold text-stone-800 sm:text-2xl">🙋 我的</h1>
-      <p class="mt-1 text-sm text-stone-500">收藏和生成的图纸都保存在本地浏览器，无需登录。</p>
+      <p class="mt-1 text-sm text-stone-500">管理你收藏和生成的图纸。</p>
     </div>
 
     <div class="flex flex-wrap items-center gap-2">
@@ -242,8 +262,8 @@ function doImport() {
     </div>
 
     <!-- 分组筛选 -->
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs font-medium text-stone-400">分组</span>
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="mr-1 text-xs font-medium text-stone-400">分组</span>
       <button
         class="chip"
         :class="activeGroup === 'all' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
@@ -258,24 +278,31 @@ function doImport() {
       >
         未分组
       </button>
-      <button
+      <div
         v-for="g in store.state.groups"
         :key="g.id"
-        class="chip"
+        class="flex items-center gap-0.5 rounded-lg py-0.5 pl-1 pr-0.5 ring-1"
         :class="activeGroup === g.id ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200'"
-        @click="activeGroup = g.id"
       >
-        {{ g.name }}（{{ g.patternIds.length }}）
-      </button>
-      <span class="flex items-center gap-1.5">
-        <input
-          v-model="newGroupName"
-          class="input !w-32 !py-1 text-xs"
-          placeholder="新建分组"
-          @keydown.enter="createGroup"
-        />
-        <button class="btn btn-secondary !px-2 !py-1 text-xs" title="新建分组" @click="createGroup">＋</button>
-      </span>
+        <button class="text-xs font-medium" @click="activeGroup = g.id">{{ g.name }}（{{ g.patternIds.length }}）</button>
+        <button
+          class="grid h-5 w-5 place-items-center rounded text-[10px]"
+          :class="activeGroup === g.id ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-stone-400 hover:bg-stone-100 hover:text-brand-600'"
+          title="重命名分组"
+          @click="openRenameGroup(g)"
+        >
+          ✎
+        </button>
+        <button
+          class="grid h-5 w-5 place-items-center rounded text-[10px]"
+          :class="activeGroup === g.id ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-stone-400 hover:bg-stone-100 hover:text-red-500'"
+          title="删除分组"
+          @click="deleteGroup(g)"
+        >
+          ✕
+        </button>
+      </div>
+      <button class="btn btn-secondary !px-2 !py-1 text-xs" title="新建分组" @click="openCreateGroup">＋ 新建分组</button>
     </div>
 
     <!-- 导入图纸面板 -->
@@ -448,5 +475,23 @@ function doImport() {
         <router-link to="/generator" class="mt-3 block font-medium text-brand-500 hover:underline">去图片转图纸 →</router-link>
       </div>
     </template>
+  </div>
+
+  <!-- 新建 / 重命名分组弹窗 -->
+  <div v-if="groupModal" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" @click.self="groupModal = false">
+    <div class="w-[320px] rounded-2xl bg-white p-5 shadow-xl">
+      <h3 class="text-base font-semibold text-stone-800">{{ groupModalMode === 'create' ? '新建分组' : '重命名分组' }}</h3>
+      <p v-if="groupModalMode === 'create'" class="mt-1 text-xs text-stone-400">给一组图纸起个名字，方便按组查看。</p>
+      <input
+        v-model="groupModalName"
+        class="input mt-3 w-full"
+        placeholder="分组名称"
+        @keydown.enter="submitGroupModal"
+      />
+      <div class="mt-5 flex justify-end gap-2">
+        <button class="btn btn-secondary" @click="groupModal = false">取消</button>
+        <button class="btn btn-primary" :disabled="!groupModalName.trim()" @click="submitGroupModal">确定</button>
+      </div>
+    </div>
   </div>
 </template>

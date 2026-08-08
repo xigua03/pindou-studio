@@ -497,7 +497,7 @@ function printA4() {
     <div class="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 class="text-xl font-bold text-stone-800 sm:text-2xl">🖼️ 图片转图纸</h1>
-        <p class="mt-1 text-sm text-stone-500">上传任意图片，自动匹配色卡转成拼豆图纸，全程在本地浏览器处理，图片不会上传。</p>
+        <p class="mt-1 text-sm text-stone-500">上传任意图片，自动匹配色卡转成拼豆图纸。</p>
       </div>
     </div>
 
@@ -906,13 +906,6 @@ function printA4() {
               </div>
               <p class="mt-2 text-[11px] leading-4 text-stone-400">留空=该色不拼豆；自动→最近色=换成视觉上最接近的其他颜色；替换为其他色号则全部换掉。预览满意后点「保存重映射」。</p>
             </div>
-          </div>
-        </details>
-
-        <details class="rounded-xl bg-stone-50 p-3">
-          <summary class="cursor-pointer text-xs font-medium text-stone-500">📊 查看用豆统计</summary>
-          <div class="mt-2">
-            <ColorLegend :pattern="displayPattern!" :palette="palette" />
           </div>
         </details>
       </section>

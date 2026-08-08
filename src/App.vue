@@ -23,7 +23,7 @@ const navs = [
 <template>
   <div class="flex min-h-screen flex-col">
     <header class="no-print sticky top-0 z-40 border-b border-stone-200/70 bg-white/85 backdrop-blur">
-      <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
         <router-link to="/" class="flex items-center gap-2">
           <span class="grid h-8 w-8 place-items-center rounded-xl bg-brand-500 text-lg text-white shadow-sm">🧩</span>
           <span class="text-lg font-bold tracking-wide text-stone-800">
@@ -62,18 +62,13 @@ const navs = [
       </div>
     </header>
 
-    <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+    <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
       <router-view />
     </main>
 
     <footer class="no-print border-t border-stone-200 bg-white">
-      <div class="mx-auto max-w-6xl px-4 py-8 text-center text-xs leading-6 text-stone-400">
-        <p class="font-medium text-stone-500">拼豆工坊 · 免费在线拼豆图纸工具，无需登录，数据仅保存在本地浏览器</p>
-        <p>
-          功能参考 dg.idouge.com「豆格」 · 色卡数据来自
-          <a class="text-brand-500 hover:underline" href="https://github.com/HansBug/pindou-color-data" target="_blank" rel="noopener">HansBug/pindou-color-data</a>
-          · 基于 Vue 3 + Vite + Tailwind CSS 构建
-        </p>
+      <div class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-stone-400">
+        <p>🧩 拼豆工坊</p>
       </div>
     </footer>
   </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { BUILTIN_PATTERNS, BUILTIN_TAGS, BUILTIN_SOURCES } from '../data/patterns'
+import { computed, ref, watch } from 'vue'
+import { BUILTIN_PATTERNS, BUILTIN_TAGS } from '../data/patterns'
 import { PALETTES, getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
 import PatternCard from '../components/PatternCard.vue'
@@ -8,15 +8,12 @@ import PatternCard from '../components/PatternCard.vue'
 const store = useStore()
 const keyword = ref('')
 const activeTag = ref('全部')
-const activeSource = ref('全部')
 
 const tags = computed(() => ['全部', ...BUILTIN_TAGS])
-const sources = computed(() => ['全部', ...BUILTIN_SOURCES])
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return BUILTIN_PATTERNS.filter((p) => {
-    if (activeSource.value !== '全部' && (p.sourceLabel ?? '内置') !== activeSource.value) return false
     const matchTag = activeTag.value === '全部' || p.tags.includes(activeTag.value)
     if (!matchTag) return false
     if (!kw) return true
@@ -26,6 +23,25 @@ const filtered = computed(() => {
       (p.description ?? '').toLowerCase().includes(kw)
     )
   })
+})
+
+// 分页：每页 24 张，筛选变化时回到第 1 页
+const PAGE_SIZE = 24
+const page = ref(1)
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
+const pagedList = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const pageNumbers = computed(() => {
+  const n = totalPages.value
+  const cur = page.value
+  const start = Math.max(1, Math.min(cur - 2, n - 4))
+  const end = Math.min(n, start + 4)
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+})
+function goPage(p: number) {
+  page.value = Math.max(1, Math.min(p, totalPages.value))
+}
+watch([keyword, activeTag], () => {
+  page.value = 1
 })
 
 const totalColors = computed(() => PALETTES.reduce((s, p) => s + p.count, 0))
@@ -40,7 +56,7 @@ const favCount = computed(() => store.state.favorites.length)
       <div class="pointer-events-none absolute right-16 bottom-[-24px] h-32 w-32 rounded-full bg-white/10"></div>
       <h1 class="text-2xl font-bold sm:text-3xl">把喜欢的图片，变成一颗一颗的拼豆</h1>
       <p class="mt-2 max-w-xl text-sm text-white/90 sm:text-base">
-        内置 6 大品牌色卡、{{ BUILTIN_PATTERNS.length }} 张示例图纸；图片一键转图纸、豆仓库存、色号查询全部免费，无需登录，数据只存在你的浏览器里。
+        内置 6 大品牌色卡、{{ BUILTIN_PATTERNS.length }} 张示例图纸；图片一键转图纸、豆仓库存、色号查询全部免费。
       </p>
 
       <div class="mt-5 flex max-w-md items-center gap-2 rounded-2xl bg-white p-1.5 shadow-sm">
@@ -85,19 +101,6 @@ const favCount = computed(() => store.state.favorites.length)
     <!-- Gallery -->
     <section>
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <span class="mr-1 text-xs font-medium text-stone-400">来源</span>
-        <button
-          v-for="sc in sources"
-          :key="'src-'+sc"
-          class="chip"
-          :class="activeSource === sc ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
-          @click="activeSource = sc"
-        >
-          {{ sc }}
-        </button>
-      </div>
-
-      <div class="mb-3 flex flex-wrap items-center gap-2">
         <span class="mr-1 text-xs font-medium text-stone-400">分类</span>
         <button
           v-for="t in tags"
@@ -110,9 +113,9 @@ const favCount = computed(() => store.state.favorites.length)
         </button>
       </div>
 
-      <div v-if="filtered.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div v-if="pagedList.length" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <PatternCard
-          v-for="p in filtered"
+          v-for="p in pagedList"
           :key="p.id"
           :pattern="p"
           :palette="getPalette(p.paletteId)!"
@@ -120,6 +123,21 @@ const favCount = computed(() => store.state.favorites.length)
       </div>
       <div v-else class="card p-10 text-center text-sm text-stone-400">
         没有找到匹配的图纸，换个关键词或标签试试～
+      </div>
+
+      <div v-if="totalPages > 1" class="mt-6 flex flex-wrap items-center justify-center gap-1.5">
+        <span class="mr-2 text-xs text-stone-400">共 {{ filtered.length }} 张 · 第 {{ page }}/{{ totalPages }} 页</span>
+        <button class="chip !px-3" :disabled="page <= 1" @click="goPage(page - 1)">‹ 上一页</button>
+        <button
+          v-for="n in pageNumbers"
+          :key="n"
+          class="chip !px-3"
+          :class="page === n ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
+          @click="goPage(n)"
+        >
+          {{ n }}
+        </button>
+        <button class="chip !px-3" :disabled="page >= totalPages" @click="goPage(page + 1)">下一页 ›</button>
       </div>
     </section>
   </div>

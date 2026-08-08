@@ -524,7 +524,7 @@ function remove() {
         <h3 class="text-base font-semibold text-stone-800">🔗 分享图纸 · {{ pattern.name }}</h3>
         <button class="rounded-lg px-2 py-1 text-stone-400 hover:bg-stone-100" @click="showShare = false">✕</button>
       </div>
-      <p class="mt-1 text-xs leading-5 text-stone-500">把下面的链接发给别人，对方打开即可查看图纸（数据已编码在链接里，无需登录）。</p>
+      <p class="mt-1 text-xs leading-5 text-stone-500">把下面的链接发给别人，对方打开即可查看图纸（数据已编码在链接里）。</p>
       <input readonly :value="shareUrl" class="input mt-3 w-full !py-2 font-mono text-xs" @focus="selectShareText" />
       <div class="mt-4 flex flex-wrap gap-2">
         <button class="btn btn-primary" @click="copyShareUrl">{{ shareCopied ? '✓ 已复制' : '复制链接' }}</button>
