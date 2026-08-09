@@ -1834,15 +1834,6 @@ async function runUpdateNow() {
         </div>
       </div>
 
-      <div class="card space-y-4 p-5">
-        <h2 class="text-sm font-semibold text-stone-700">🔄 在线更新配置</h2>
-        <div>
-          <label class="mb-1.5 block text-xs font-medium text-stone-500">pm2 进程名</label>
-          <input v-model="settings.updatePm2Name" class="input !w-64" placeholder="pindou" />
-          <p class="mt-1 text-[11px] text-stone-400">仅当服务通过 pm2 启动时需要，更新完成后会自动执行 pm2 restart 该进程。</p>
-        </div>
-      </div>
-
       <p v-if="settingsMsg" class="rounded-lg bg-green-50 px-3 py-2 text-xs text-green-600">{{ settingsMsg }}</p>
       <div class="flex justify-end">
         <button class="btn btn-primary" @click="saveSettings">保存采集设置</button>
@@ -1997,6 +1988,15 @@ async function runUpdateNow() {
             <label class="mb-1.5 block text-xs font-medium text-stone-500">兑换获得 AI 次数</label>
             <input v-model.number="settings.exchangeQuota" type="number" min="1" max="1000" class="input !w-40" />
           </div>
+        </div>
+      </div>
+
+      <div class="card space-y-4 p-5">
+        <h2 class="text-sm font-semibold text-stone-700">🔄 在线更新配置</h2>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-stone-500">pm2 进程名</label>
+          <input v-model="settings.updatePm2Name" class="input !w-64" placeholder="pindou" />
+          <p class="mt-1 text-[11px] text-stone-400">仅当服务通过 pm2 启动时需要，更新完成后会自动执行 pm2 restart 该进程。</p>
         </div>
       </div>
 
