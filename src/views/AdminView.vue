@@ -1226,7 +1226,7 @@ let updTimer: number | undefined
 async function loadUpdate() {
   await run(async () => {
     upd.value = await api<UpdateStatus>('/admin/update/status')
-    if (upd.value?.running || upd.value?.needsRestart) pollUpdate()
+    if (upd.value?.running || upd.value?.needsRestart || upd.value?.stale) pollUpdate()
   })
 }
 function fmtElapsed(startedAt?: number): string {
@@ -1237,32 +1237,79 @@ function fmtElapsed(startedAt?: number): string {
   const s = sec % 60
   return m + ' 分 ' + s + ' 秒'
 }
+function onUpdateVisibility() {
+  // 切回前台时立即刷新一次，避免后台标签节流导致重启完成不自动消失
+  if (document.visibilityState === 'visible') {
+    loadUpdate().catch(() => {})
+  }
+}
+async function tickUpdateStatus() {
+  try {
+    const st = await api<UpdateStatus>('/admin/update/status')
+    const prev = upd.value
+    upd.value = st
+    // 检测到“待重启 -> 已完成”的切换：自动提示更新完成
+    if (prev && prev.needsRestart && !st.needsRestart && !st.running && !st.stale && st.status?.ok) {
+      updMsg.value = '✅ 更新完成，服务已重启并生效'
+    }
+    if (!st.running && !st.needsRestart && !st.stale && updTimer) {
+      window.clearInterval(updTimer)
+      updTimer = undefined
+      window.removeEventListener('visibilitychange', onUpdateVisibility)
+    }
+  } catch {
+    /* 服务重启中 / 网络波动：忽略，继续轮询 */
+  }
+}
 function pollUpdate() {
   window.clearInterval(updTimer)
-  updTimer = window.setInterval(async () => {
-    try {
-      const st = await api<UpdateStatus>('/admin/update/status')
-      upd.value = st
-      if (!st.running && !st.needsRestart && updTimer) {
-        window.clearInterval(updTimer)
-        updTimer = undefined
-      }
-    } catch {
-      /* ignore */
-    }
-  }, 4000)
+  window.removeEventListener('visibilitychange', onUpdateVisibility)
+  window.addEventListener('visibilitychange', onUpdateVisibility)
+  updTimer = window.setInterval(tickUpdateStatus, 4000)
 }
 onUnmounted(() => {
   window.clearInterval(updTimer)
   updTimer = undefined
+  window.removeEventListener('visibilitychange', onUpdateVisibility)
 })
 
-async function runUpdateNow() {
+interface ConfirmState {
+  title: string
+  message: string
+  flow?: string[]
+  note?: string
+  confirmText?: string
+  action: () => void | Promise<void>
+}
+const confirmState = ref<ConfirmState | null>(null)
+function askConfirm(c: ConfirmState) {
+  confirmState.value = c
+}
+function closeConfirm() {
+  confirmState.value = null
+}
+async function doConfirm() {
+  const c = confirmState.value
+  if (!c) return
+  closeConfirm()
+  await c.action()
+}
+
+function askRunUpdate() {
   if (!upd.value?.hasUpdate) {
     updMsg.value = '当前没有可更新的版本'
     return
   }
-  if (!window.confirm('确定要执行在线更新吗？\n将拉取最新代码、安装依赖、构建前端并重启服务，期间站点会短暂不可用。')) return
+  askConfirm({
+    title: '确认在线更新',
+    message: '将拉取最新代码、安装依赖、构建前端并重启服务。期间站点会短暂不可用，请勿关闭页面。',
+    flow: ['拉取代码', '安装依赖', '构建前端', '重启服务'],
+    note: '更新完成后提示会自动消失，无需手动刷新。',
+    confirmText: '开始更新',
+    action: runUpdateNow
+  })
+}
+async function runUpdateNow() {
   updMsg.value = ''
   await run(async () => {
     await api('/admin/update/run', { method: 'POST', body: JSON.stringify({ pm2Name: settings.value.updatePm2Name }) })
@@ -1271,8 +1318,16 @@ async function runUpdateNow() {
     pollUpdate()
   })
 }
+function askResetUpdate() {
+  askConfirm({
+    title: '重置更新状态',
+    message: '将清除上次疑似中断的更新记录，不会影响代码与数据。',
+    note: '仅清除更新状态记录，不影响代码与数据。',
+    confirmText: '确认重置',
+    action: resetUpdateState
+  })
+}
 async function resetUpdateState() {
-  if (!window.confirm('确定要重置更新状态吗？\n将清除上次疑似中断的更新记录（不会影响代码与数据）。')) return
   await run(async () => {
     await api('/admin/update/reset', { method: 'POST' })
     updMsg.value = '更新状态已重置'
@@ -2116,7 +2171,7 @@ async function resetUpdateState() {
           <h2 class="text-base font-semibold text-stone-800">⬇ 版本更新</h2>
           <div class="flex items-center gap-2">
             <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="loadUpdate">刷新状态</button>
-            <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="resetUpdateState">重置更新状态</button>
+            <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="askResetUpdate">重置更新状态</button>
           </div>
         </div>
         <div class="grid gap-3 sm:grid-cols-2">
@@ -2156,7 +2211,7 @@ async function resetUpdateState() {
         </div>
 
         <div class="flex flex-wrap items-center gap-3 border-t border-stone-100 pt-4">
-          <button class="btn btn-primary" :disabled="upd?.running || upd?.needsRestart || !upd?.hasUpdate" @click="runUpdateNow">一键更新到最新版</button>
+          <button class="btn btn-primary" :disabled="upd?.running || upd?.needsRestart || !upd?.hasUpdate" @click="askRunUpdate">一键更新到最新版</button>
           <span class="text-xs text-stone-400">更新将执行：拉取代码 → 安装依赖 → 构建前端 → 重启服务（pm2）</span>
         </div>
         <div v-if="upd?.logTail && upd?.logVisible !== false" class="rounded-xl border border-stone-100 p-4">
@@ -2345,5 +2400,34 @@ async function resetUpdateState() {
     </div>
       </div>
     </div>
+
   </div>
+
+    <!-- 通用确认弹窗（替换浏览器原生 confirm） -->
+    <div v-if="confirmState" class="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4" @click.self="closeConfirm">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div class="flex items-start gap-3">
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </span>
+          <div class="min-w-0 flex-1">
+            <h3 class="text-base font-semibold text-stone-800">{{ confirmState.title }}</h3>
+            <p class="mt-1.5 text-sm leading-6 text-stone-500">{{ confirmState.message }}</p>
+            <div v-if="confirmState.flow" class="mt-4 flex flex-wrap items-center gap-1.5">
+              <template v-for="(step, si) in confirmState.flow" :key="step">
+                <span v-if="si > 0" class="text-stone-300">→</span>
+                <span class="rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">{{ step }}</span>
+              </template>
+            </div>
+            <div v-if="confirmState.note" class="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+              {{ confirmState.note }}
+            </div>
+          </div>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary" @click="closeConfirm">取消</button>
+          <button class="btn btn-primary" @click="doConfirm">{{ confirmState.confirmText || '确定' }}</button>
+        </div>
+      </div>
+    </div>
 </template>
