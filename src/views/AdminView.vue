@@ -159,7 +159,7 @@ const settings = ref({
   collectEnabled: false,
   collectIntervalMin: 60,
   collectLimit: 10,
-  collectSources: ['perler', 'beadpattern', 'beadcanvas'],
+  collectSources: ['perler', 'beadpattern', 'beadcanvas', 'makebead'],
   collectExcludeTags: '',
   collectMaxWidth: 0,
   collectMaxBeads: 0,
@@ -405,7 +405,7 @@ async function resetPassword(u: AdminUser) {
 }
 
 
-// ---------- ?????? ----------
+// ---------- 采集预览后再入库（C2） ----------
 const userSelected = ref<Record<string, boolean>>({})
 const userSelectedCount = computed(() => Object.values(userSelected.value).filter(Boolean).length)
 function toggleUserSelect(id: number) {
@@ -884,8 +884,10 @@ interface CollectSourceResult {
   added?: number
   skippedExisting?: number
   skippedByFilter?: number
+  skippedNoPng?: number
   errors?: number
   error?: string
+  errMsgs?: string[]
 }
 interface CollectResult {
   total: number
@@ -896,7 +898,17 @@ interface CollectResult {
   errors: number
   results?: CollectSourceResult[]
 }
-const collectStatus = ref<{ enabled: boolean; intervalMin: number; limit: number; sources: string[]; collectSources: string[]; lastRunAt: number; lastResult: CollectResult | null } | null>(null)
+interface CollectSourceStat {
+  source: string
+  label: string
+  count: number
+}
+interface CollectHistoryItem {
+  action: string
+  detail: string
+  at: number
+}
+const collectStatus = ref<{ enabled: boolean; intervalMin: number; limit: number; sources: string[]; collectSources: string[]; lastRunAt: number; lastResult: CollectResult | null; sourceStats: CollectSourceStat[]; history: CollectHistoryItem[] } | null>(null)
 const collectMsg = ref('')
 async function loadCollectStatus() {
   try {
@@ -944,6 +956,7 @@ function sourceLabel(s: string): string {
     perler: 'Perler 画廊',
     beadpattern: 'BeadPattern 画廊',
     beadcanvas: 'BeadsCanvas 图纸库',
+    makebead: 'MakeBead 图纸库',
     pixelbeads: 'Pixel-Beads'
   }
   return map[s] || s
@@ -952,11 +965,50 @@ function sourceDesc(s: string): string {
   const map: Record<string, string> = {
     perler: 'perlerbeads.net · 图案预览图',
     beadpattern: 'beadpattern.net · 高清网格图（180×180）',
-    beadcanvas: 'beadscanvas.com · 直接抓取完整网格（免下载图片）'
+    beadcanvas: 'beadscanvas.com · 直接抓取完整网格（免下载图片）',
+    makebead: 'makebead.com · 详情接口直取完整网格（含每格色值）'
   }
   return map[s] || ''
 }
-const collectSourceKeys = computed(() => (collectStatus.value?.sources?.length ? collectStatus.value.sources : ['perler', 'beadpattern', 'beadcanvas']))
+function sourceSite(s: string): string {
+  const map: Record<string, string> = {
+    perler: 'https://perlerbeads.net/zh/gallery',
+    beadpattern: 'https://beadpattern.net/gallery',
+    beadcanvas: 'https://www.beadscanvas.com/zh/patterns',
+    makebead: 'https://makebead.com/zh-Hans/patterns'
+  }
+  return map[s] || ''
+}
+const collectSourceKeys = computed(() => (collectStatus.value?.sources?.length ? collectStatus.value.sources : ['perler', 'beadpattern', 'beadcanvas', 'makebead']))
+
+const expandedSource = ref('')
+function toggleSourceExpand(s: string) {
+  expandedSource.value = expandedSource.value === s ? '' : s
+}
+function sourceCount(s: string): number {
+  return collectStatus.value?.sourceStats?.find((st) => st.source === s)?.count || 0
+}
+function sourceLastDetail(s: string): { text: string; errors: string[] } {
+  const r = collectStatus.value?.lastResult?.results?.find((x) => x.source === s)
+  if (!r) return { text: '', errors: [] }
+  if (r.error) return { text: '', errors: [r.error] }
+  const parts: string[] = []
+  if (r.total != null) parts.push(`抓到 ${r.total} 条`)
+  if (r.added) parts.push(`新增 ${r.added}`)
+  if (r.skippedExisting) parts.push(`跳过已有 ${r.skippedExisting}`)
+  if (r.skippedByFilter) parts.push(`过滤 ${r.skippedByFilter}`)
+  if (r.skippedNoPng) parts.push(`无网格 ${r.skippedNoPng}`)
+  if (r.errors) parts.push(`失败 ${r.errors}`)
+  return { text: parts.join('，'), errors: Array.isArray(r.errMsgs) ? r.errMsgs.slice(0, 3) : [] }
+}
+function sourceLastText(s: string): string {
+  const d = sourceLastDetail(s)
+  if (d.errors.length) return '失败'
+  return d.text || '无记录'
+}
+function sourceLastOk(s: string): boolean {
+  return !sourceLastDetail(s).errors.length
+}
 
 /** 把预览条目的 rows 渲染成缩略图 dataURL（按 mard-221 色卡上色，带缓存） */
 function previewThumb(it: CollectPreviewItem): string {
@@ -1816,7 +1868,7 @@ async function resetUpdateState() {
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-sm font-semibold text-stone-700">🗂 图纸采集</h2>
-            <p class="text-xs text-stone-400">定时抓取多个拼豆图库（Perler 画廊、BeadPattern 画廊等），新图纸自动转成内置图纸（已存在的自动跳过）。</p>
+            <p class="text-xs text-stone-400">定时抓取多个拼豆图库（Perler 画廊、BeadPattern 画廊、MakeBead 等），新图纸自动转成内置图纸（已存在的自动跳过）。</p>
           </div>
           <input v-model="settings.collectEnabled" type="checkbox" class="h-5 w-5 accent-brand-500" title="开启定时采集" />
         </div>
@@ -1837,12 +1889,26 @@ async function resetUpdateState() {
               v-for="s in collectSourceKeys"
               :key="s"
               class="flex items-start gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-stone-200"
+              :class="expandedSource === s ? '!ring-brand-400' : ''"
             >
               <input v-model="settings.collectSources" type="checkbox" :value="s" class="mt-0.5 h-4 w-4 accent-brand-500" />
-              <span>
-                <span class="block text-sm font-medium text-stone-700">{{ sourceLabel(s) }}</span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-sm font-medium text-stone-700">{{ sourceLabel(s) }}</span>
+                  <button type="button" class="shrink-0 text-[10px] text-brand-500 hover:underline" @click="toggleSourceExpand(s)">{{ expandedSource === s ? '收起' : '详情' }}</button>
+                </div>
                 <span class="block text-[11px] leading-4 text-stone-400">{{ sourceDesc(s) || '外部拼豆图纸库' }}</span>
-              </span>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-stone-500">
+                  <span>已入库 <b class="text-stone-700">{{ sourceCount(s) }}</b></span>
+                  <span>上次 <span :class="sourceLastOk(s) ? 'text-green-600' : 'text-red-500'">{{ sourceLastText(s) }}</span></span>
+                  <a v-if="sourceSite(s)" :href="sourceSite(s)" target="_blank" rel="noopener" class="text-brand-500 hover:underline">查看源站 ↗</a>
+                </div>
+                <div v-if="expandedSource === s" class="mt-2 space-y-1 border-t border-stone-100 pt-2 text-[10px] leading-4 text-stone-500">
+                  <p v-if="sourceLastDetail(s).errors.length" class="font-medium text-red-500">失败原因：<template v-for="(e, i) in sourceLastDetail(s).errors" :key="i"><span v-if="i" class="mx-0.5">/</span>{{ e }}</template></p>
+                  <p v-if="sourceLastDetail(s).text">{{ sourceLastDetail(s).text }}</p>
+                  <p v-if="!sourceLastDetail(s).text && !sourceLastDetail(s).errors.length">尚无采集记录，可先点「立即采集一次」。</p>
+                </div>
+              </div>
             </label>
           </div>
         </div>
@@ -1936,6 +2002,28 @@ async function resetUpdateState() {
             <button class="btn btn-primary !py-1.5 text-xs" :disabled="previewLoading || previewSelectedCount === 0" @click="importSelected">
               📥 导入选中 {{ previewSelectedCount }} 条
             </button>
+          </div>
+        </div>
+        <!-- 采集历史 -->
+        <div v-if="collectStatus?.history?.length" class="rounded-xl bg-stone-50 px-4 py-3">
+          <p class="mb-2 text-xs font-semibold text-stone-600">最近采集记录（最近 20 次）</p>
+          <div class="max-h-44 overflow-auto">
+            <table class="w-full text-left text-[11px] text-stone-500">
+              <thead>
+                <tr class="text-stone-400">
+                  <th class="whitespace-nowrap py-1 pr-3 font-medium">时间</th>
+                  <th class="whitespace-nowrap py-1 pr-3 font-medium">类型</th>
+                  <th class="py-1 font-medium">说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(h, hi) in collectStatus.history" :key="hi" class="border-t border-stone-200/60">
+                  <td class="whitespace-nowrap py-1 pr-3">{{ fmtTime(h.at) }}</td>
+                  <td class="whitespace-nowrap py-1 pr-3">{{ h.action === 'admin_collect_run' ? '采集' : '导入' }}</td>
+                  <td class="py-1">{{ h.detail }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

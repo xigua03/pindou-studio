@@ -304,6 +304,82 @@ export async function fetchBeadCanvasItems() {
   }
 }
 
+/** 抓取 makebead.com 图纸列表：图库页卡片链接（最新）+ /api/patterns/featured（热门），按 id 去重 */
+export async function fetchMakeBeadItems() {
+  const seen = new Map()
+  // 图库页支持?page=N 分页，每页约 24 张卡片；取前 4 页得到足够的最新图纸
+  for (let page = 1; page <= 4; page++) {
+    try {
+      const body = await getText('https://makebead.com/zh-Hans/patterns?page=' + page, 60000)
+      // 卡片链接：/zh-Hans/patterns/p/<slug>-<id>
+      const hrefs = body.match(/href="(\/zh-Hans\/patterns\/p\/[^"]+)"/g) || []
+      const meta = new Map()
+      const blocks = body.match(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g) || []
+      for (const block of blocks) {
+        try {
+          const ld = JSON.parse(block.replace(/^<script type="application\/ld\+json">/, '').replace(/<\/script>$/, ''))
+          if (ld && ld['@type'] === 'CollectionPage' && Array.isArray(ld.hasPart)) {
+            for (const it of ld.hasPart) {
+              const m = it && it.url ? String(it.url).match(/-([a-f0-9]{16})\/?$/) : null
+              if (m) meta.set(m[1], { name: it.name || '', image: String(it.image || '').replace(/&amp;/g, '&') })
+            }
+          }
+        } catch (e) { /* 跳过单个 JSON-LD */ }
+      }
+      for (const h of hrefs) {
+        const m = h.match(/-([a-f0-9]{16})"?$/)
+        if (!m) continue
+        const id = m[1]
+        const md = meta.get(id) || {}
+        seen.set(id, { id, name: md.name || '', image: md.image || 'https://makebead.com/api/patterns/' + id + '/thumbnail.png', tags: [] })
+      }
+    } catch (e) { /* 单页失败继续下一页 */ }
+  }
+  // 热门图纸（带 tags 元数据）
+  try {
+    const body = JSON.parse(await getText('https://makebead.com/api/patterns/featured', 30000))
+    for (const it of (body.patterns || [])) {
+      if (!it || !it.id) continue
+      let tags = []
+      try { tags = JSON.parse(it.tags || '[]') } catch (e) { tags = [] }
+      seen.set(it.id, {
+        id: it.id,
+        name: it.title || '',
+        url: 'https://makebead.com/zh-Hans/patterns/p/' + (it.slug || it.id) + '-' + it.id,
+        image: 'https://makebead.com/api/patterns/' + it.id + '/thumbnail.png',
+        tags: Array.isArray(tags) ? tags : []
+      })
+    }
+  } catch (e) { /* 热门接口失败不影响最新列表 */ }
+  return Array.from(seen.values())
+}
+
+
+/** 把 makebead 详情接口的 gridData（每格 hex/rgb）映射到 mard-221 色号；为 null 的格子视为空格 */
+export function makeBeadGridToRows(gd) {
+  const grid = gd && Array.isArray(gd.grid) ? gd.grid : null
+  if (!grid || !grid.length) return null
+  const pal = loadRefPalette()
+  const rows = []
+  for (const line of grid) {
+    if (!Array.isArray(line)) continue
+    const row = []
+    for (const cell of line) {
+      if (!cell || !Array.isArray(cell.rgb)) { row.push('.'); continue }
+      const rgb = cell.rgb
+      const lab = rgbToLab(rgb[0], rgb[1], rgb[2])
+      let best = null, bestD = Infinity
+      for (const c of pal) {
+        const d = ciede2000(lab[0], lab[1], lab[2], c.lab[0], c.lab[1], c.lab[2])
+        if (d < bestD) { bestD = d; best = c }
+      }
+      row.push(best ? best.code : '.')
+    }
+    rows.push(row)
+  }
+  return rows.length ? rows : null
+}
+
 /** 由条目 URL 推导稳定的图纸 id */
 function slugFromUrl(url) {
   const parts = String(url || '').replace(/\/+$/, '').split('/')
@@ -418,7 +494,7 @@ export function imageToGridOpt(png, { maxW = 96, native = null } = {}) {
 }
 
 /** 采集源配置 */
-export const COLLECT_SOURCES = ['perler', 'beadpattern', 'beadcanvas']
+export const COLLECT_SOURCES = ['perler', 'beadpattern', 'beadcanvas', 'makebead']
 
 const SOURCES = {
   perler: {
@@ -490,11 +566,39 @@ const SOURCES = {
       }
       return rows.length ? rows : null
     }
+  },
+  // MakeBead：图库页 JSON-LD 列表 + 详情接口直接给完整网格（每格 hex），无需下载图片
+  makebead: {
+    label: 'MakeBead图纸库',
+    idPrefix: 'makebead-',
+    maxW: 220,
+    native: () => null,
+    desc: (w, h) => '拼豆图纸（网格 ' + w + 'x' + h + '）',
+    tags: (it) => (Array.isArray(it.tags) ? it.tags.slice(0, 6) : []),
+    idOf: (it) => String(it.id || '').toLowerCase().replace(/[^a-z0-9-]/g, ''),
+    imageOf: (it) => it.image || '',
+    fetch: () => fetchMakeBeadItems(),
+    // 详情接口直取完整网格（含每格 hex），映射到 mard-221
+    rowsAsync: async (it) => {
+      if (!it.id) return null
+      const body = await getText('https://makebead.com/api/patterns/' + encodeURIComponent(it.id), 30000)
+      const data = JSON.parse(body)
+      const p = data && data.pattern
+      const gd = p && typeof p.gridData === 'string' ? JSON.parse(p.gridData) : null
+      if (!gd) return null
+      const rows = makeBeadGridToRows(gd)
+      if (rows && rows.length && Array.isArray(p.tags) && p.tags.length) it.tags = p.tags.slice(0, 6)
+      return rows
+    }
   }
 }
 
 /** 由条目生成 mard 色号网格：优先走源自带 toRows（gridData 直取），否则下载 PNG 解码量化 */
 async function rowsFromItem(src, it) {
+  if (typeof src.rowsAsync === 'function') {
+    const rows = await src.rowsAsync(it)
+    if (rows && rows.length) return rows
+  }
   if (typeof src.toRows === 'function') {
     const rows = src.toRows(it)
     if (rows && rows.length) return rows

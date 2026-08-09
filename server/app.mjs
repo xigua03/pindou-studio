@@ -1212,7 +1212,25 @@ function collectFilters() {
   }
 }
 
+const COLLECT_LABELS = {
+  perler: 'Perler画廊',
+  beadpattern: 'BeadPattern画廊',
+  beadcanvas: 'BeadsCanvas图纸库',
+  makebead: 'MakeBead图纸库'
+}
+
 app.get('/api/admin/collect/status', auth, adminOnly, (req, res) => {
+  // 各来源已入库数量（按 source_label 统计，老数据中文乱码时按前缀兼容）
+  const rows = db.prepare("SELECT source_label AS label, COUNT(*) AS c FROM patterns WHERE is_builtin = 1 AND source_label IS NOT NULL AND source_label != '' GROUP BY source_label").all()
+  const sourceStats = COLLECT_SOURCES.map((s) => {
+    const label = COLLECT_LABELS[s] || s
+    const prefix = s === 'beadpattern' ? 'BeadPattern' : s === 'beadcanvas' ? 'BeadsCanvas' : s === 'makebead' ? 'MakeBead' : 'Perler'
+    const count = rows.filter((r) => r.label === label || String(r.label || '').startsWith(prefix)).reduce((a, r) => a + r.c, 0)
+    return { source: s, label, count }
+  })
+  // 最近采集历史（手动运行 / 导入记录）
+  const history = db.prepare("SELECT action, detail, created_at FROM logs WHERE action IN ('admin_collect_run','admin_collect_import') ORDER BY id DESC LIMIT 20").all()
+    .map((r) => ({ action: r.action, detail: String(r.detail || ''), at: r.created_at }))
   res.json({
     enabled: setting('collect_enabled', '0') === '1',
     intervalMin: intSetting('collect_interval_min', 60),
@@ -1220,7 +1238,9 @@ app.get('/api/admin/collect/status', auth, adminOnly, (req, res) => {
     sources: COLLECT_SOURCES,
     collectSources: collectSourcesSetting(),
     lastRunAt: Number(setting('collect_last_run_at', '0')) || 0,
-    lastResult: safeJson(setting('collect_last_result', ''), null)
+    lastResult: safeJson(setting('collect_last_result', ''), null),
+    sourceStats,
+    history
   })
 })
 
