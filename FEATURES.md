@@ -186,7 +186,7 @@ npm run dev      # 前端开发（/api 已代理到 8787）
 - ✅ **F1 原色预览**：结果区可切换「原色预览 / 拼豆图纸」，原色预览与图纸同一网格分辨率、跟随裁剪偏移。
 - ✅ **F3 AI 参考图模式（img2img）**：AI 生成页可上传参考图，按文字描述重绘（通义万相 wanx2.1-imageedit，description_edit）；按钮文案随参考图动态变化；参考图 <512px 自动放大。
 - ✅ **F4 大图提速（Web Worker）**：量化（nearest / Floyd-Steinberg）在格数 ≥12000 时自动转到 Web Worker，主线程不卡顿；不可用/超时/出错自动回退。
-- ✅ **C1 更多采集源**：新增 **BeadsCanvas 图纸库**（beadscanvas.com/zh/patterns），RSC 直接带完整 gridData，无需下载图片即可入库；豆格/小红书因接口未公开/登录墙暂不可接入。
+- ✅ **C1 更多采集源**：新增 **BeadsCanvas 图纸库**（beadscanvas.com/zh/patterns），RSC 直接带完整 gridData，无需下载图片即可入库；小红书等站点因接口未公开/登录墙暂不可接入。
 - ✅ **C2 采集预览后再入库**：后台采集新增「预览后再入库」模式，抓取预览（不入库）、缩略图网格 + 勾选 + 全选，点导入才真正入库（幂等）。
 - ✅ **T1 深色模式**：顶部导航 🌙/☀️ 切换，localStorage 持久化（pd_theme），默认跟随系统 prefers-color-scheme；通过 CSS 变量覆盖实现全站生效。
 
