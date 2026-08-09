@@ -19,15 +19,42 @@ const auth = useAuth()
 const { isLoggedIn } = auth
 const usage = ref<AiUsage | null>(null)
 
-onMounted(() => {
-  remoteHealth().then((h) => (serverOk.value = h ? h.ai : false))
+function getGuestId(): string {
+  let id = ''
+  try {
+    id = localStorage.getItem('pd_guest_id') || ''
+  } catch {
+    /* noop */
+  }
+  if (!id) {
+    id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+    try {
+      localStorage.setItem('pd_guest_id', id)
+    } catch {
+      /* noop */
+    }
+  }
+  return id
+}
+
+async function refreshUsage() {
   if (auth.state.user) {
     auth.aiUsage().then((u) => (usage.value = u)).catch(() => {})
-  } else {
-    auth.fetchMe().then(() => {
-      if (auth.state.user) auth.aiUsage().then((u) => (usage.value = u)).catch(() => {})
-    })
+    return
   }
+  try {
+    const res = await fetch('/api/ai/guest-usage?guestId=' + encodeURIComponent(getGuestId()))
+    if (res.ok) usage.value = (await res.json()) as AiUsage
+  } catch {
+    /* 后端不可用 */
+  }
+}
+
+onMounted(() => {
+  remoteHealth().then((h) => (serverOk.value = h ? h.ai : false))
+  auth.fetchMe().then(() => {
+    refreshUsage()
+  })
 })
 
 /** 追加拼豆友好提示，提升转图纸效果 */
@@ -42,6 +69,7 @@ function friendlyError(raw: string): string {
     return '内容安全审核未通过：可能是描述中包含了敏感或不合适的内容。请把描述改得更温和、正向一点再试（如避免暴力、血腥、恐怖、争议等词汇）。'
   }
   if (/超时|timeout/i.test(raw)) return 'AI 生成超时了，请稍后再试一次。'
+  if (/游客今日 AI 生成次数已用完/i.test(raw)) return '游客今日 AI 生成次数已用完，登录后可获得更多次数。'
   if (/^AI 生成失败/i.test(raw)) return raw
   return 'AI 生成失败：' + raw
 }
@@ -59,7 +87,7 @@ async function generate() {
     const res = await fetch('/api/ai/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: 'Bearer ' + getToken() } : {}) },
-      body: JSON.stringify({ prompt: buildPrompt(p) })
+      body: JSON.stringify({ prompt: buildPrompt(p), guestId: getGuestId() })
     })
     const data = (await res.json()) as { ok?: boolean; imageBase64?: string; model?: string; error?: string }
     if (!res.ok || !data.ok) {
@@ -72,6 +100,7 @@ async function generate() {
     error.value = 'AI 服务暂时不可用，请稍后再试'
   } finally {
     generating.value = false
+    refreshUsage()
   }
 }
 
@@ -131,10 +160,18 @@ function useInGenerator() {
           🤖 今日已用 <b>{{ usage?.today ?? '-' }}</b> / {{ usage?.limit ?? '-' }} 次
           <span v-if="usage && usage.today >= usage.limit">（今日额度已用完，明天再来或联系管理员提高上限）</span>
         </div>
-        <div v-else class="rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-500">
-          👤 当前为游客（不限次数）。
-          <router-link to="/login" class="font-medium text-brand-500 hover:underline">登录</router-link>
-          后可查看用量并跨设备同步。
+        <div
+          v-else
+          class="rounded-xl px-3 py-2 text-xs"
+          :class="usage && usage.today >= usage.limit ? 'bg-red-50 text-red-600' : 'bg-stone-100 text-stone-500'"
+        >
+          <template v-if="usage">
+            👤 游客今日已用 <b>{{ usage.today }}</b> / {{ usage.limit }} 次
+            <span v-if="usage.today >= usage.limit">（次数已用完，登录后可继续）</span>
+          </template>
+          <template v-else>👤 游客模式</template>
+          <router-link to="/login" class="ml-1 font-medium text-brand-500 hover:underline">登录</router-link>
+          后可获得更多次数并跨设备同步。
         </div>
 
         <button class="btn btn-primary w-full" :disabled="generating" @click="generate">

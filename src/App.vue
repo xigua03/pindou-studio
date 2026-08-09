@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useConfig } from './composables/useConfig'
+import { useStore } from './composables/useStore'
 import { useAuth } from './composables/useAuth'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuth()
 const { isLoggedIn, isAdmin } = auth
+const config = useConfig()
+const store = useStore()
 const menuOpen = ref(false)
 const userMenuOpen = ref(false)
 watch(
@@ -17,16 +22,31 @@ watch(
 )
 onMounted(() => {
   auth.fetchMe()
+  config.loadConfig()
+  store.loadServerPatterns()
 })
 
 const navs = [
-  { to: '/', label: '图纸库', icon: '🏠' },
-  { to: '/generator', label: '图片转图纸', icon: '🖼️' },
-  { to: '/ai', label: 'AI 生成', icon: '🤖' },
-  { to: '/palette', label: '色卡', icon: '🎨' },
-  { to: '/warehouse', label: '豆仓', icon: '📦' },
+  { to: '/', label: '图纸库', icon: '🏠', feature: 'gallery' },
+  { to: '/generator', label: '图片转图纸', icon: '🖼️', feature: 'generator' },
+  { to: '/ai', label: 'AI 生成', icon: '🤖', feature: 'ai' },
+  { to: '/palette', label: '色卡', icon: '🎨', feature: 'palette' },
+  { to: '/warehouse', label: '豆仓', icon: '📦', feature: 'warehouse' },
   { to: '/mine', label: '我的', icon: '🙋' }
 ]
+const visibleNavs = computed(() => navs.filter((n) => !n.feature || config.featureEnabled(n.feature as 'gallery')))
+
+// 功能被关闭时，把当前路由重定向回首页
+watch(
+  [() => config.state.loaded, () => route.meta.feature],
+  () => {
+    const f = route.meta.feature as string | undefined
+    if (f && config.state.loaded && !config.featureEnabled(f as 'gallery')) {
+      router.replace('/')
+    }
+  },
+  { immediate: true }
+)
 
 function logout() {
   auth.logout()
@@ -51,7 +71,7 @@ function logout() {
 
         <nav class="hidden items-center gap-1 md:flex">
           <router-link
-            v-for="n in navs"
+            v-for="n in visibleNavs"
             :key="n.to"
             :to="n.to"
             class="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[15px] font-medium text-stone-600 transition hover:bg-brand-50 hover:text-brand-600"
@@ -114,7 +134,7 @@ function logout() {
 
       <div v-if="menuOpen" class="border-t border-stone-100 bg-white px-4 py-2 md:hidden">
         <router-link
-          v-for="n in navs"
+          v-for="n in visibleNavs"
           :key="n.to"
           :to="n.to"
           class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[15px] font-medium text-stone-700 hover:bg-brand-50 hover:text-brand-600"
@@ -131,6 +151,13 @@ function logout() {
         </router-link>
       </div>
     </header>
+
+    <div v-if="config.state.maintenance" class="no-print bg-amber-500 px-4 py-2 text-center text-sm font-medium text-white">
+      ⚠️ 站点维护中，部分功能可能暂时不可用
+    </div>
+    <div v-if="config.state.siteNotice" class="no-print border-b border-brand-100 bg-brand-50 px-4 py-2 text-center text-sm text-brand-700">
+      {{ config.state.siteNotice }}
+    </div>
 
     <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
       <router-view />

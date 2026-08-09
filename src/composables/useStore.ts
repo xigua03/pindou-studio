@@ -1,4 +1,4 @@
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import type { Inventory, Pattern } from '../types'
 import { loadJSON, saveJSON } from '../utils/storage'
 import { BUILTIN_PATTERNS } from '../data/patterns'
@@ -87,6 +87,9 @@ const state = reactive<PersistedState>({
   groups: loadJSON<PatternGroup[]>('groups', [])
 })
 
+/** ?????????????????????? null??????? */
+const serverPatterns = ref<Pattern[] | null>(null)
+
 // 启动清理（去重）后立即写回本地，避免旧重复数据残留
 if (initialPatterns.length !== dedupedPatterns.length || initialFavorites.length !== dedupedFavorites.length) {
   saveJSON('patterns', dedupedPatterns)
@@ -115,10 +118,44 @@ watch(
 )
 
 export function useStore() {
-  const allPatterns = (): Pattern[] => [...BUILTIN_PATTERNS, ...state.savedPatterns]
+  const allPatterns = (): Pattern[] => [
+    ...(serverPatterns.value ?? BUILTIN_PATTERNS),
+    ...state.savedPatterns
+  ]
 
   const getPattern = (id: string): Pattern | undefined =>
-    BUILTIN_PATTERNS.find((p) => p.id === id) ?? state.savedPatterns.find((p) => p.id === id)
+    (serverPatterns.value ?? BUILTIN_PATTERNS).find((p) => p.id === id) ??
+    state.savedPatterns.find((p) => p.id === id)
+
+  /** ?????????????????????????????? */
+  const galleryPatterns = (): Pattern[] => serverPatterns.value ?? BUILTIN_PATTERNS
+
+  /** ??????????????/??/??? */
+  const loadServerPatterns = async (): Promise<void> => {
+    try {
+      const res = await fetch('/api/patterns')
+      if (!res.ok) return
+      const data = (await res.json()) as { patterns?: Array<Record<string, unknown>> }
+      const list: Pattern[] = (data.patterns || [])
+        .filter((p) => p && p.id && Array.isArray(p.rows))
+        .map((p) => ({
+          id: String(p.id),
+          name: String(p.name || '???'),
+          description: String(p.description || ''),
+          tags: Array.isArray(p.tags) ? (p.tags as string[]) : [],
+          paletteId: String(p.paletteId || 'mard-221-github'),
+          width: Number(p.width) || 0,
+          height: Number(p.height) || 0,
+          rows: p.rows as string[][],
+          source: 'builtin' as const,
+          sourceLabel: p.sourceLabel ? String(p.sourceLabel) : undefined,
+          createdAt: Number(p.createdAt) || 0
+        }))
+      serverPatterns.value = list
+    } catch {
+      /* ???????????? */
+    }
+  }
 
   const isFavorite = (id: string): boolean => state.favorites.includes(id)
 
@@ -239,6 +276,8 @@ export function useStore() {
     state,
     allPatterns,
     getPattern,
+    galleryPatterns,
+    loadServerPatterns,
     isFavorite,
     toggleFavorite,
     setFavorites,

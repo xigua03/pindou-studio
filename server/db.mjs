@@ -151,8 +151,19 @@ export function seedAdmin() {
   console.log('[seed] 默认管理员已创建：admin / admin123（请尽快在后台修改）')
 }
 
-/** 初始化：建表 + 导入内置图纸 + 种子管理员 */
+/** 轻量迁移：给老库补新列 */
+function migrate() {
+  const cols = (t) => new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name))
+  const acols = cols('ai_usage')
+  if (!acols.has('guest_id')) db.exec('ALTER TABLE ai_usage ADD COLUMN guest_id TEXT')
+  const pcols = cols('patterns')
+  if (!pcols.has('source_label')) db.exec('ALTER TABLE patterns ADD COLUMN source_label TEXT')
+  if (!pcols.has('featured')) db.exec('ALTER TABLE patterns ADD COLUMN featured INTEGER NOT NULL DEFAULT 0')
+}
+
+/** 初始化：迁移 + 建表 + 导入内置图纸 + 种子管理员 */
 export function initDb() {
+  migrate()
   importBuiltinPatterns()
   seedAdmin()
 }

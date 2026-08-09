@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import { useConfig } from '../composables/useConfig'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
+const config = useConfig()
+onMounted(() => {
+  config.loadConfig()
+})
 
 const mode = ref<'login' | 'register'>('login')
 const account = ref('')
@@ -29,6 +34,10 @@ async function submit() {
       return
     }
   } else {
+    if (!config.state.registerOpen) {
+      error.value = '当前未开放注册，请联系管理员'
+      return
+    }
     const uname = username.value.trim()
     const em = email.value.trim()
     if (uname.length < 2 || uname.length > 24) {
@@ -101,6 +110,12 @@ async function submit() {
       </div>
 
       <form class="space-y-4 p-6" @submit.prevent="submit">
+        <div
+          v-if="mode === 'register' && !config.state.registerOpen"
+          class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700"
+        >
+          ⚠️ 当前未开放注册，只能登录已有账号。
+        </div>
         <!-- 注册 -->
         <template v-if="mode === 'register'">
           <div>

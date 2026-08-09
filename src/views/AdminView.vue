@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { api } from '../utils/api'
+import { PALETTES } from '../data/palettes'
 
 const router = useRouter()
 const auth = useAuth()
@@ -61,6 +62,9 @@ interface AdminPattern {
   difficulty: string | null
   beadCount: number
   userId: number | null
+  tags: string[]
+  sourceLabel: string
+  featured: boolean
   createdAt: number
 }
 const patterns = ref<AdminPattern[]>([])
@@ -130,7 +134,23 @@ const logPage = ref(1)
 const logSize = ref(15)
 
 // ---------- 设置 ----------
-const settings = ref({ siteNotice: '', aiEnabled: true, aiDailyLimit: 50, maintenance: false })
+const settings = ref({
+  siteNotice: '',
+  maintenance: false,
+  registerOpen: true,
+  features: { gallery: true, generator: true, ai: true, palette: true, warehouse: true, share: true },
+  aiEnabled: true,
+  aiDailyLimit: 50,
+  aiGuestLimit: 10
+})
+const featureItems = [
+  { key: 'gallery', label: '图纸库', icon: '🏠', desc: '首页图纸库浏览与详情' },
+  { key: 'generator', label: '图片转图纸', icon: '🖼️', desc: '上传图片生成图纸' },
+  { key: 'ai', label: 'AI 生成', icon: '🤖', desc: '文字描述生成图纸' },
+  { key: 'palette', label: '色卡', icon: '🎨', desc: '品牌色卡与颜色查询' },
+  { key: 'warehouse', label: '豆仓', icon: '📦', desc: '豆子库存管理' },
+  { key: 'share', label: '分享', icon: '🔗', desc: '短链接分享图纸' }
+] as const
 const settingsMsg = ref('')
 
 function fmtTime(t: number | null): string {
@@ -224,15 +244,110 @@ async function togglePatternStatus(p: AdminPattern) {
 async function editPattern(p: AdminPattern) {
   const name = prompt('图纸名称：', p.name)
   if (name === null) return
+  const tags = prompt('标签（用逗号分隔，留空不修改）：', (p.tags || []).join(','))
+  if (tags === null) return
+  const source = prompt('来源（如：原创 / Perler画廊，留空不修改）：', p.sourceLabel || '')
+  if (source === null) return
   const diff = prompt('难度（简单/中等/复杂，留空不修改）：', p.difficulty || '')
+  if (diff === null) return
   try {
     await api(`/admin/patterns/${encodeURIComponent(p.id)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: name.trim() || p.name, difficulty: diff && diff.trim() ? diff.trim() : p.difficulty })
+      body: JSON.stringify({
+        name: name.trim() || p.name,
+        tags: tags.trim() ? tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean) : p.tags,
+        sourceLabel: source.trim(),
+        difficulty: diff && diff.trim() ? diff.trim() : p.difficulty
+      })
     })
     loadPatterns()
   } catch (e) {
     alert(e instanceof Error ? e.message : '操作失败')
+  }
+}
+
+async function toggleFeatured(p: AdminPattern) {
+  try {
+    await api(`/admin/patterns/${encodeURIComponent(p.id)}`, { method: 'PATCH', body: JSON.stringify({ featured: !p.featured }) })
+    loadPatterns()
+  } catch (e) {
+    alert(e instanceof Error ? e.message : '操作失败')
+  }
+}
+
+// ---------- 新增图纸 ----------
+const showNewPattern = ref(false)
+const newPatMsg = ref('')
+const newPat = ref({
+  id: '',
+  name: '',
+  paletteId: 'mard-221-github',
+  tags: '',
+  sourceLabel: '',
+  difficulty: '',
+  status: 'published',
+  featured: false,
+  content: ''
+})
+function openNewPattern() {
+  newPat.value = { id: '', name: '', paletteId: 'mard-221-github', tags: '', sourceLabel: '', difficulty: '', status: 'published', featured: false, content: '' }
+  newPatMsg.value = ''
+  showNewPattern.value = true
+}
+
+function parseContent(text: string): string[][] | null {
+  const t = text.trim()
+  if (!t) return null
+  // JSON 数组
+  if (t.startsWith('[')) {
+    try {
+      const arr = JSON.parse(t)
+      if (!Array.isArray(arr)) return null
+      return arr.map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? '.')) : []))
+    } catch {
+      return null
+    }
+  }
+  // 网格文本：每行用空格/逗号/制表符分隔的色号，. 表示空格
+  const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return null
+  const rows = lines.map((line) => line.split(/[,;\t ]+/).map((c) => c.trim()).filter(Boolean))
+  return rows
+}
+
+async function createPattern() {
+  newPatMsg.value = ''
+  const name = newPat.value.name.trim()
+  if (!name) {
+    newPatMsg.value = '请填写图纸名称'
+    return
+  }
+  const rows = parseContent(newPat.value.content)
+  if (!rows || !rows.length) {
+    newPatMsg.value = '图纸内容不能为空，支持色号网格或 JSON 数组'
+    return
+  }
+  try {
+    await api('/admin/patterns', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: newPat.value.id.trim() || undefined,
+        name,
+        paletteId: newPat.value.paletteId,
+        tags: newPat.value.tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
+        sourceLabel: newPat.value.sourceLabel.trim(),
+        difficulty: newPat.value.difficulty.trim() || undefined,
+        status: newPat.value.status,
+        featured: newPat.value.featured,
+        rows
+      })
+    })
+    showNewPattern.value = false
+    loadPatterns()
+    // 刷新图纸库数据
+    try { await fetch('/api/patterns') } catch { /* ignore */ }
+  } catch (e) {
+    newPatMsg.value = e instanceof Error ? e.message : '创建失败'
   }
 }
 
@@ -512,6 +627,7 @@ function pager(total: number, page: number, size: number) {
           <option value="hidden">已下架</option>
         </select>
         <button class="btn btn-secondary" @click="patternPage = 1; loadPatterns()">搜索</button>
+        <button class="btn btn-primary ml-auto" @click="openNewPattern">＋ 新增图纸</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full min-w-[820px] text-left text-sm">
@@ -529,8 +645,11 @@ function pager(total: number, page: number, size: number) {
           <tbody class="divide-y divide-stone-100">
             <tr v-for="p in patterns" :key="p.id">
               <td class="px-4 py-2.5">
-                <router-link :to="'/pattern/' + p.id" class="font-medium text-stone-800 hover:text-brand-600">{{ p.name }}</router-link>
-                <p class="text-[11px] font-mono text-stone-400">{{ p.id }}</p>
+                <div class="flex items-center gap-1.5">
+                  <router-link :to="'/pattern/' + p.id" class="font-medium text-stone-800 hover:text-brand-600">{{ p.name }}</router-link>
+                  <span v-if="p.featured" class="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">⭐ 推荐</span>
+                </div>
+                <p class="text-[11px] font-mono text-stone-400">{{ p.id }}<span v-if="p.sourceLabel" class="ml-1.5">· {{ p.sourceLabel }}</span></p>
               </td>
               <td class="px-4 py-2.5 text-stone-600">{{ p.width }} × {{ p.height }}</td>
               <td class="px-4 py-2.5 text-stone-600">{{ p.difficulty || '-' }}</td>
@@ -545,6 +664,7 @@ function pager(total: number, page: number, size: number) {
                 </button>
               </td>
               <td class="px-4 py-2.5 text-right whitespace-nowrap">
+                <button class="btn btn-secondary !px-2.5 !py-1 text-xs" @click="toggleFeatured(p)">{{ p.featured ? '取消推荐' : '推荐' }}</button>
                 <button class="btn btn-secondary !px-2.5 !py-1 text-xs" @click="editPattern(p)">编辑</button>
                 <button class="btn btn-danger !px-2.5 !py-1 text-xs" :disabled="p.isBuiltin" @click="deletePattern(p)">删除</button>
               </td>
@@ -701,29 +821,65 @@ function pager(total: number, page: number, size: number) {
     </section>
 
     <!-- 系统设置 -->
-    <section v-if="tab === 'settings'" class="card max-w-2xl space-y-4 p-5">
-      <div>
-        <label class="mb-1.5 block text-xs font-medium text-stone-500">站点公告</label>
-        <textarea v-model="settings.siteNotice" rows="3" class="input w-full resize-y" placeholder="显示在图纸库顶部的公告"></textarea>
-      </div>
-      <div class="flex items-center justify-between rounded-xl bg-stone-50 px-4 py-3">
+    <section v-if="tab === 'settings'" class="max-w-3xl space-y-4">
+      <div class="card space-y-4 p-5">
+        <h2 class="text-sm font-semibold text-stone-700">📢 基础设置</h2>
         <div>
-          <p class="text-sm font-medium text-stone-700">AI 生成开关</p>
-          <p class="text-xs text-stone-400">关闭后 AI 生成接口返回不可用</p>
+          <label class="mb-1.5 block text-xs font-medium text-stone-500">站点公告</label>
+          <textarea v-model="settings.siteNotice" rows="3" class="input w-full resize-y" placeholder="显示在页面顶部的公告"></textarea>
         </div>
-        <input v-model="settings.aiEnabled" type="checkbox" class="h-5 w-5 accent-brand-500" />
-      </div>
-      <div>
-        <label class="mb-1.5 block text-xs font-medium text-stone-500">登录用户每日 AI 次数上限</label>
-        <input v-model.number="settings.aiDailyLimit" type="number" min="1" max="10000" class="input !w-40" />
-      </div>
-      <div class="flex items-center justify-between rounded-xl bg-stone-50 px-4 py-3">
-        <div>
-          <p class="text-sm font-medium text-stone-700">维护模式</p>
-          <p class="text-xs text-stone-400">开启后前端显示维护提示（接口仍可用）</p>
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-stone-700">维护模式</p>
+            <p class="text-xs text-stone-400">开启后前端顶部显示维护提示</p>
+          </div>
+          <input v-model="settings.maintenance" type="checkbox" class="h-5 w-5 accent-brand-500" />
         </div>
-        <input v-model="settings.maintenance" type="checkbox" class="h-5 w-5 accent-brand-500" />
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-stone-700">开放注册</p>
+            <p class="text-xs text-stone-400">关闭后新用户无法注册，只能登录已有账号</p>
+          </div>
+          <input v-model="settings.registerOpen" type="checkbox" class="h-5 w-5 accent-brand-500" />
+        </div>
       </div>
+
+      <div class="card space-y-4 p-5">
+        <h2 class="text-sm font-semibold text-stone-700">🧩 功能开关</h2>
+        <p class="text-xs text-stone-400">关闭后对应菜单隐藏、直接访问会被引导回首页。</p>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div v-for="f in featureItems" :key="f.key" class="flex items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3">
+            <div>
+              <p class="text-sm font-medium text-stone-700">{{ f.icon }} {{ f.label }}</p>
+              <p class="text-xs text-stone-400">{{ f.desc }}</p>
+            </div>
+            <input v-model="settings.features[f.key]" type="checkbox" class="h-5 w-5 accent-brand-500" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card space-y-4 p-5">
+        <h2 class="text-sm font-semibold text-stone-700">🤖 AI 设置</h2>
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-stone-700">AI 生成开关</p>
+            <p class="text-xs text-stone-400">关闭后 AI 生成接口返回不可用</p>
+          </div>
+          <input v-model="settings.aiEnabled" type="checkbox" class="h-5 w-5 accent-brand-500" />
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-stone-500">登录用户每日 AI 次数上限</label>
+            <input v-model.number="settings.aiDailyLimit" type="number" min="1" max="10000" class="input !w-40" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-stone-500">游客每日 AI 次数上限</label>
+            <input v-model.number="settings.aiGuestLimit" type="number" min="0" max="10000" class="input !w-40" />
+            <p class="mt-1 text-[11px] text-stone-400">填 0 表示游客完全不能使用 AI 生成。</p>
+          </div>
+        </div>
+      </div>
+
       <p v-if="settingsMsg" class="rounded-lg bg-green-50 px-3 py-2 text-xs text-green-600">{{ settingsMsg }}</p>
       <div class="flex justify-end">
         <button class="btn btn-primary" @click="saveSettings">保存设置</button>
@@ -765,5 +921,71 @@ function pager(total: number, page: number, size: number) {
         </div>
       </div>
     </section>
+    <!-- 新增图纸 -->
+    <div v-if="showNewPattern" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" @click.self="showNewPattern = false">
+      <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <h3 class="text-base font-semibold text-stone-800">＋ 新增图纸</h3>
+        <p class="mt-1 text-xs text-stone-400">新增后立即出现在前端图纸库；支持「推荐」与「下架」。</p>
+        <div class="mt-4 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">名称 *</label>
+              <input v-model="newPat.name" class="input" placeholder="图纸名称" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">ID（可选）</label>
+              <input v-model="newPat.id" class="input" placeholder="留空自动生成" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">色卡</label>
+              <select v-model="newPat.paletteId" class="input !py-1.5">
+                <option v-for="pl in PALETTES" :key="pl.id" :value="pl.id">{{ pl.title }}（{{ pl.count }} 色）</option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">来源</label>
+              <input v-model="newPat.sourceLabel" class="input" placeholder="如：原创" />
+            </div>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-medium text-stone-500">标签（逗号分隔）</label>
+            <input v-model="newPat.tags" class="input" placeholder="动物, 卡通, 简单" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">难度</label>
+              <select v-model="newPat.difficulty" class="input !py-1.5">
+                <option value="">自动</option>
+                <option value="简单">简单</option>
+                <option value="中等">中等</option>
+                <option value="复杂">复杂</option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-stone-500">状态</label>
+              <select v-model="newPat.status" class="input !py-1.5">
+                <option value="published">上架</option>
+                <option value="hidden">下架</option>
+              </select>
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-stone-700">
+            <input v-model="newPat.featured" type="checkbox" class="h-4 w-4 accent-brand-500" /> ⭐ 设为推荐图纸
+          </label>
+          <div>
+            <label class="mb-1 block text-xs font-medium text-stone-500">图纸内容 *</label>
+            <textarea v-model="newPat.content" rows="6" class="input w-full resize-y font-mono text-xs" placeholder="每行一个格子：色号用空格/逗号分隔，空格用 . 表示&#10;A1 B2 .&#10;. C3 D4&#10;或粘贴 JSON 数组"></textarea>
+            <p class="mt-1 text-[11px] text-stone-400">示例：第一行 A1 B2 .，第二行 . C3 D4（共两行三列）。</p>
+          </div>
+        </div>
+        <p v-if="newPatMsg" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ newPatMsg }}</p>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary" @click="showNewPattern = false">取消</button>
+          <button class="btn btn-primary" @click="createPattern">创建图纸</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

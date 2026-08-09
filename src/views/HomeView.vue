@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { BUILTIN_PATTERNS, BUILTIN_TAGS, patternBeadCount, patternDifficulty } from '../data/patterns'
+import { patternBeadCount, patternDifficulty } from '../data/patterns'
 import { PALETTES, getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
+import { useConfig } from '../composables/useConfig'
 import PatternCard from '../components/PatternCard.vue'
 
 const store = useStore()
+const config = useConfig()
+const galleryOff = computed(() => config.state.loaded && !config.featureEnabled('gallery'))
 const keyword = ref('')
 const activeTag = ref('全部')
 // D19：难度 / 豆数筛选
@@ -14,11 +17,11 @@ const diffOptions = ['全部', '简单', '中等', '复杂']
 const beadRange = ref('全部')
 const beadRanges = ['全部', '500颗以下', '500~2000颗', '2000颗以上']
 
-const tags = computed(() => ['全部', ...BUILTIN_TAGS])
+const tags = computed(() => ['全部', ...new Set(store.galleryPatterns().flatMap((p) => p.tags))])
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
-  return BUILTIN_PATTERNS.filter((p) => {
+  return store.galleryPatterns().filter((p) => {
     const matchTag = activeTag.value === '全部' || p.tags.includes(activeTag.value)
     if (!matchTag) return false
     const diff = activeDiff.value
@@ -63,13 +66,20 @@ const favCount = computed(() => store.state.favorites.length)
 
 <template>
   <div class="space-y-6">
+    <div v-if="galleryOff" class="card p-16 text-center">
+      <p class="text-4xl">🚧</p>
+      <h2 class="mt-3 text-lg font-bold text-stone-700">图纸库功能已关闭</h2>
+      <p class="mt-1 text-sm text-stone-400">管理员已关闭图纸库，请稍后再来，或使用顶部其他功能。</p>
+    </div>
+
+    <template v-else>
     <!-- Hero -->
     <section class="card relative overflow-hidden bg-gradient-to-br from-brand-500 via-brand-400 to-sun-400 p-6 text-white sm:p-10">
       <div class="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10"></div>
       <div class="pointer-events-none absolute right-16 bottom-[-24px] h-32 w-32 rounded-full bg-white/10"></div>
       <h1 class="text-2xl font-bold sm:text-3xl">把喜欢的图片，变成一颗一颗的拼豆</h1>
       <p class="mt-2 max-w-xl text-sm text-white/90 sm:text-base">
-        内置 6 大品牌色卡、{{ BUILTIN_PATTERNS.length }} 张示例图纸；图片一键转图纸、豆仓库存、色号查询全部免费。
+        内置 6 大品牌色卡、{{ store.galleryPatterns().length }} 张示例图纸；图片一键转图纸、豆仓库存、色号查询全部免费。
       </p>
 
       <div class="mt-5 flex max-w-md items-center gap-2 rounded-2xl bg-white p-1.5 shadow-sm">
@@ -94,7 +104,7 @@ const favCount = computed(() => store.state.favorites.length)
     <!-- Stats -->
     <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="card p-4 text-center">
-        <p class="text-2xl font-bold text-brand-500">{{ BUILTIN_PATTERNS.length }}</p>
+        <p class="text-2xl font-bold text-brand-500">{{ store.galleryPatterns().length }}</p>
         <p class="mt-1 text-xs text-stone-400">内置图纸</p>
       </div>
       <div class="card p-4 text-center">
@@ -178,5 +188,6 @@ const favCount = computed(() => store.state.favorites.length)
         <button class="chip !px-3" :disabled="page >= totalPages" @click="goPage(page + 1)">下一页 ›</button>
       </div>
     </section>
+    </template>
   </div>
 </template>

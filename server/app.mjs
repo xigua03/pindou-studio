@@ -31,6 +31,10 @@ function setting(key, def) {
 function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value))
 }
+function intSetting(key, def) {
+  const n = Number(setting(key, String(def)))
+  return Number.isFinite(n) ? n : def
+}
 function publicUser(u) {
   return { id: u.id, username: u.username, email: u.email, nickname: u.nickname || u.username, avatar: u.avatar, bio: u.bio, role: u.role, status: u.status, createdAt: u.created_at, lastLoginAt: u.last_login_at }
 }
@@ -39,7 +43,8 @@ function cleanPattern(p) {
     id: p.id, userId: p.user_id, name: p.name, description: p.description || '',
     tags: safeJson(p.tags, []), paletteId: p.palette_id, width: p.width, height: p.height,
     rows: safeJson(p.rows, []), source: p.source, status: p.status, isBuiltin: !!p.is_builtin,
-    difficulty: p.difficulty, beadCount: p.bead_count, createdAt: p.created_at, updatedAt: p.updated_at
+    difficulty: p.difficulty, beadCount: p.bead_count, sourceLabel: p.source_label || '',
+    featured: !!p.featured, createdAt: p.created_at, updatedAt: p.updated_at
   }
 }
 function safeJson(s, def) { try { return JSON.parse(s) } catch { return def } }
@@ -242,26 +247,39 @@ app.get('/api/shares/mine', auth, (req, res) => {
   res.json({ shares: rows.map((r) => ({ id: r.id, visits: r.visits, expiresAt: r.expires_at, createdAt: r.created_at, name: safeJson(r.entry, {}).name || '共享图纸' })) })
 })
 
-/* ================= AI（用量记录 + 登录用户额度） ================= */
+/* ================= AI（用量记录 + 登录/游客额度） ================= */
 app.post('/api/ai/generate', async (req, res, next) => {
   try {
+    if (setting('ai_enabled', '1') !== '1') return res.status(403).json({ error: 'AI 生成功能暂未开放' })
     const userId = req.user ? req.user.uid : null
+    const guestId = userId ? null : String((req.body || {}).guestId || '').trim().slice(0, 64) || null
     const prompt = String((req.body || {}).prompt || '').trim()
     if (!prompt) return res.status(400).json({ error: 'prompt 不能为空' })
-    // 额度：登录用户按日限额（默认 50）
+    // 额度：登录用户按日限额（默认 50）；游客按 ai_guest_limit（默认 10，可后台调整）
+    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
     if (userId) {
-      const limit = Number(setting('ai_daily_limit', '50')) || 50
-      const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
+      const limit = intSetting('ai_daily_limit', 50)
       const used = db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE user_id = ? AND created_at >= ?').get(userId, dayStart.getTime())
       if (used.c >= limit) return res.status(429).json({ error: '今日 AI 生成次数已用完，明天再来吧' })
+    } else {
+      const limit = intSetting('ai_guest_limit', 10)
+      const used = guestId
+        ? db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE guest_id = ? AND created_at >= ?').get(guestId, dayStart.getTime())
+        : db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE user_id IS NULL AND created_at >= ?').get(dayStart.getTime())
+      if (used.c >= limit) return res.status(429).json({ error: '游客今日 AI 生成次数已用完，登录后可获得更多次数' })
     }
     const model = process.env.WANX_MODEL || 'wanx2.1-t2i-turbo'
     const imageBase64 = await text2Image(prompt)
-    db.prepare('INSERT INTO ai_usage (user_id, prompt, model, status, created_at) VALUES (?,?,?,?,?)').run(userId, prompt.slice(0, 300), model, 'ok', now())
+    db.prepare('INSERT INTO ai_usage (user_id, guest_id, prompt, model, status, created_at) VALUES (?,?,?,?,?,?)').run(userId, guestId, prompt.slice(0, 300), model, 'ok', now())
     res.json({ ok: true, imageBase64, model })
   } catch (err) {
     const msg = String((err && err.message) || err)
-    db.prepare('INSERT INTO ai_usage (user_id, prompt, model, status, created_at) VALUES (?,?,?,?,?)').run(req.user ? req.user.uid : null, String((req.body || {}).prompt || '').slice(0, 300), 'wanx', msg.includes('SAFETY') ? 'blocked' : 'failed', now())
+    db.prepare('INSERT INTO ai_usage (user_id, guest_id, prompt, model, status, created_at) VALUES (?,?,?,?,?,?)').run(
+      req.user ? req.user.uid : null,
+      String((req.body || {}).guestId || '').trim().slice(0, 64) || null,
+      String((req.body || {}).prompt || '').slice(0, 300),
+      'wanx', msg.includes('SAFETY') ? 'blocked' : 'failed', now()
+    )
     next(err)
   }
 })
@@ -304,8 +322,19 @@ async function text2Image(prompt) {
 app.get('/api/ai/usage/mine', auth, (req, res) => {
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
   const used = db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE user_id = ? AND created_at >= ?').get(req.user.uid, dayStart.getTime())
-  const limit = Number(setting('ai_daily_limit', '50')) || 50
+  const limit = intSetting('ai_daily_limit', 50)
   const total = db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE user_id = ?').get(req.user.uid)
+  res.json({ today: used.c, limit, total: total.c })
+})
+
+/* 游客 AI 用量（按设备 guestId，无需登录） */
+app.get('/api/ai/guest-usage', (req, res) => {
+  const guestId = String(req.query.guestId || '').trim().slice(0, 64)
+  const limit = intSetting('ai_guest_limit', 10)
+  if (!guestId) return res.json({ today: 0, limit, total: 0 })
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
+  const used = db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE guest_id = ? AND created_at >= ?').get(guestId, dayStart.getTime())
+  const total = db.prepare('SELECT COUNT(*) AS c FROM ai_usage WHERE guest_id = ?').get(guestId)
   res.json({ today: used.c, limit, total: total.c })
 })
 
@@ -388,16 +417,46 @@ app.get('/api/admin/patterns', auth, adminOnly, (req, res) => {
   res.json({ total: total.c, page, size, patterns: rows.map(cleanPattern) })
 })
 
+app.post('/api/admin/patterns', auth, adminOnly, (req, res) => {
+  const b = req.body || {}
+  const name = String(b.name || '').trim()
+  const paletteId = String(b.paletteId || '').trim()
+  const rows = Array.isArray(b.rows) ? b.rows : []
+  if (!name || !paletteId || !rows.length) return res.status(400).json({ error: '需要名称、色卡和图纸内容' })
+  const clean = rows
+    .map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? '.')) : []))
+    .filter((r) => r.length > 0)
+  if (!clean.length) return res.status(400).json({ error: '图纸内容为空' })
+  const width = Math.max(...clean.map((r) => r.length))
+  const height = clean.length
+  let beads = 0
+  for (const r of clean) for (const c of r) if (c && c !== '.') beads++
+  const id = b.id ? String(b.id).trim().slice(0, 40) : 'ad' + Date.now().toString(36)
+  if (db.prepare('SELECT id FROM patterns WHERE id = ?').get(id)) return res.status(409).json({ error: 'ID 已存在' })
+  const difficulty = b.difficulty || (beads < 500 ? '简单' : beads <= 2000 ? '中等' : '复杂')
+  db.prepare(
+    'INSERT INTO patterns (id, user_id, name, description, tags, palette_id, width, height, rows, source, status, is_builtin, difficulty, bead_count, source_label, featured, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)'
+  ).run(
+    id, null, name, String(b.description || ''), JSON.stringify(Array.isArray(b.tags) ? b.tags : []), paletteId,
+    width, height, JSON.stringify(clean), 'builtin', b.status === 'hidden' ? 'hidden' : 'published',
+    difficulty, beads, String(b.sourceLabel || '').slice(0, 40), b.featured ? 1 : 0, now(), now()
+  )
+  log(req.user.uid, 'admin_pattern_create', `新增图纸 ${id}`, req)
+  res.json({ ok: true, id })
+})
+
 app.patch('/api/admin/patterns/:id', auth, adminOnly, (req, res) => {
-  const { name, tags, difficulty, status, description } = req.body || {}
+  const { name, tags, difficulty, status, description, sourceLabel, featured } = req.body || {}
   const p = db.prepare('SELECT * FROM patterns WHERE id = ?').get(String(req.params.id))
   if (!p) return res.status(404).json({ error: '图纸不存在' })
-  db.prepare('UPDATE patterns SET name = ?, tags = ?, difficulty = ?, status = ?, description = ?, updated_at = ? WHERE id = ?').run(
+  db.prepare('UPDATE patterns SET name = ?, tags = ?, difficulty = ?, status = ?, description = ?, source_label = ?, featured = ?, updated_at = ? WHERE id = ?').run(
     name ? String(name).slice(0, 80) : p.name,
     tags ? JSON.stringify(tags) : p.tags,
     difficulty || p.difficulty,
     status || p.status,
     description !== undefined ? String(description).slice(0, 500) : p.description,
+    sourceLabel !== undefined ? String(sourceLabel).slice(0, 40) : p.source_label,
+    featured !== undefined ? (featured ? 1 : 0) : p.featured,
     now(), p.id
   )
   log(req.user.uid, 'admin_pattern_update', `修改图纸 ${p.id}`, req)
@@ -436,7 +495,7 @@ app.get('/api/admin/ai-usage', auth, adminOnly, (req, res) => {
   const size = Math.min(100, Math.max(1, Number(req.query.size) || 20))
   const total = db.prepare('SELECT COUNT(*) AS c FROM ai_usage').get()
   const rows = db.prepare('SELECT * FROM ai_usage ORDER BY id DESC LIMIT ? OFFSET ?').all(size, (page - 1) * size)
-  res.json({ total: total.c, page, size, usage: rows.map((r) => ({ id: r.id, userId: r.user_id, prompt: r.prompt, model: r.model, status: r.status, createdAt: r.created_at })) })
+  res.json({ total: total.c, page, size, usage: rows.map((r) => ({ id: r.id, userId: r.user_id, guestId: r.guest_id || null, prompt: r.prompt, model: r.model, status: r.status, createdAt: r.created_at })) })
 })
 
 app.get('/api/admin/logs', auth, adminOnly, (req, res) => {
@@ -469,18 +528,35 @@ app.patch('/api/admin/feedback/:id', auth, adminOnly, (req, res) => {
 app.get('/api/admin/settings', auth, adminOnly, (req, res) => {
   res.json({
     siteNotice: setting('site_notice', ''),
+    maintenance: setting('maintenance', '0') === '1',
+    registerOpen: setting('register_open', '1') === '1',
+    features: {
+      gallery: setting('feature_gallery', '1') === '1',
+      generator: setting('feature_generator', '1') === '1',
+      ai: setting('feature_ai', '1') === '1',
+      palette: setting('feature_palette', '1') === '1',
+      warehouse: setting('feature_warehouse', '1') === '1',
+      share: setting('feature_share', '1') === '1'
+    },
     aiEnabled: setting('ai_enabled', '1') === '1',
-    aiDailyLimit: Number(setting('ai_daily_limit', '50')) || 50,
-    maintenance: setting('maintenance', '0') === '1'
+    aiDailyLimit: intSetting('ai_daily_limit', 50),
+    aiGuestLimit: intSetting('ai_guest_limit', 10)
   })
 })
 
 app.put('/api/admin/settings', auth, adminOnly, (req, res) => {
   const b = req.body || {}
   if (b.siteNotice !== undefined) setSetting('site_notice', String(b.siteNotice).slice(0, 500))
+  if (b.maintenance !== undefined) setSetting('maintenance', b.maintenance ? '1' : '0')
+  if (b.registerOpen !== undefined) setSetting('register_open', b.registerOpen ? '1' : '0')
+  if (b.features) {
+    for (const [k, v] of Object.entries(b.features)) {
+      if (['gallery', 'generator', 'ai', 'palette', 'warehouse', 'share'].includes(k)) setSetting('feature_' + k, v ? '1' : '0')
+    }
+  }
   if (b.aiEnabled !== undefined) setSetting('ai_enabled', b.aiEnabled ? '1' : '0')
   if (b.aiDailyLimit !== undefined) setSetting('ai_daily_limit', String(Math.max(1, Math.min(10000, Number(b.aiDailyLimit) || 50))))
-  if (b.maintenance !== undefined) setSetting('maintenance', b.maintenance ? '1' : '0')
+  if (b.aiGuestLimit !== undefined) setSetting('ai_guest_limit', String(Math.max(0, Math.min(10000, Number.isFinite(Number(b.aiGuestLimit)) ? Number(b.aiGuestLimit) : 10))))
   log(req.user.uid, 'admin_settings', '更新系统设置', req)
   res.json({ ok: true })
 })
@@ -502,6 +578,34 @@ app.get('/api/admin/export', auth, adminOnly, (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Content-Disposition', `attachment; filename="pindou-backup-${new Date().toISOString().slice(0, 10)}.json"`)
   res.send(JSON.stringify(data, null, 2))
+})
+
+/* 公开配置：功能开关 / 公告 / 维护模式 / 注册开关 / AI 额度 */
+app.get('/api/config', (req, res) => {
+  res.json({
+    siteNotice: setting('site_notice', ''),
+    maintenance: setting('maintenance', '0') === '1',
+    registerOpen: setting('register_open', '1') === '1',
+    features: {
+      gallery: setting('feature_gallery', '1') === '1',
+      generator: setting('feature_generator', '1') === '1',
+      ai: setting('feature_ai', '1') === '1',
+      palette: setting('feature_palette', '1') === '1',
+      warehouse: setting('feature_warehouse', '1') === '1',
+      share: setting('feature_share', '1') === '1'
+    },
+    ai: {
+      enabled: setting('ai_enabled', '1') === '1',
+      guestLimit: intSetting('ai_guest_limit', 10),
+      userLimit: intSetting('ai_daily_limit', 50)
+    }
+  })
+})
+
+/* ???????????????????????????? */
+app.get('/api/patterns', (req, res) => {
+  const rows = db.prepare('SELECT * FROM patterns WHERE is_builtin = 1 AND status = ? ORDER BY featured DESC, updated_at DESC').all('published')
+  res.json({ total: rows.length, patterns: rows.map(cleanPattern) })
 })
 
 app.get('/api/health', (req, res) => {
