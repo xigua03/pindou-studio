@@ -3,6 +3,7 @@ import type { Inventory, Pattern } from '../types'
 import { loadJSON, saveJSON } from '../utils/storage'
 import { BUILTIN_PATTERNS } from '../data/patterns'
 import { getPalette } from '../data/palettes'
+import { fetchTimeout } from '../utils/api'
 
 /** ????? rows ???????? "A1F4.."?????????????? */
 function splitRowCells(row: string, codes: string[]): string[] {
@@ -150,7 +151,7 @@ export function useStore() {
   /** ??????????????/??/??? */
   const loadServerPatterns = async (): Promise<void> => {
     try {
-      const res = await fetch('/api/patterns')
+      const res = await fetchTimeout('/api/patterns')
       if (!res.ok) return
       const data = (await res.json()) as { patterns?: Array<Record<string, unknown>> }
       const list: Pattern[] = (data.patterns || [])
@@ -177,7 +178,7 @@ export function useStore() {
   /** 单图纸加载：本地没有时从服务端拉取并合并进 gallery 状态，避免“图纸不存在” */
   const fetchPattern = async (id: string): Promise<Pattern | undefined> => {
     try {
-      const res = await fetch(`/api/patterns/${encodeURIComponent(id)}`)
+      const res = await fetchTimeout(`/api/patterns/${encodeURIComponent(id)}`)
       if (!res.ok) return undefined
       const p = (await res.json()) as Record<string, unknown>
       if (!p || !p.id || !Array.isArray(p.rows)) return undefined

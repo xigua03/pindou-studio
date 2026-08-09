@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { api } from '../utils/api'
@@ -1225,6 +1225,11 @@ function pollUpdate() {
     }
   }, 4000)
 }
+onUnmounted(() => {
+  window.clearInterval(updTimer)
+  updTimer = undefined
+})
+
 async function runUpdateNow() {
   if (!upd.value?.hasUpdate) {
     updMsg.value = '当前没有可更新的版本'

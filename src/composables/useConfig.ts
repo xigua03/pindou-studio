@@ -3,6 +3,7 @@
  * 后端不可用时保持默认（全部开放），不影响离线使用
  */
 import { reactive } from 'vue'
+import { fetchTimeout } from '../utils/api'
 
 export type FeatureKey = 'gallery' | 'generator' | 'ai' | 'palette' | 'warehouse' | 'share'
 
@@ -27,7 +28,7 @@ const state = reactive<AppConfig & { loaded: boolean }>({ ...defaults, loaded: f
 export function useConfig() {
   async function loadConfig(): Promise<void> {
     try {
-      const res = await fetch('/api/config')
+      const res = await fetchTimeout('/api/config')
       if (!res.ok) {
         state.loaded = true
         return

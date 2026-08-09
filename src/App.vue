@@ -84,7 +84,7 @@ function logout() {
   auth.logout()
   userMenuOpen.value = false
   if (route.path === '/profile' || route.path === '/admin') {
-    window.location.hash = '#/'
+    router.replace('/')
   }
 }
 

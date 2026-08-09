@@ -15,13 +15,13 @@
 | 📦 豆仓 | 按品牌色卡登记你拥有的豆子颜色与数量；图纸详情自动计算"差几颗/需购几颗" |
 | 🎨 色卡 | **20 套品牌色卡共 4600+ 色号**（国内：MARD 221/291、COCO、DODO、卡卡、漫漫、盼盼、咪小窝、小舞、黄豆豆、柿柿、童趣、优肯 174/221/197/418；进口：Perler、Hama、Nabbi）+ **🧪 自定义调色板**（自己创建色卡：增删色号+颜色，保存后可在生成器/换色卡中使用）；颜色选色 → 跨品牌查找最接近色号 |
 | ♥ 我的 | 收藏 + 我的图纸，本地持久化；**自动去重**（内容相同的图纸只保留一份）+ **批量管理**（多选、全选、批量收藏/删除、批量移动分组）+ **📁 分组**（收藏/图纸按组筛选、卡片加入分组）+ **⇪ 导入图纸**（粘贴色号网格 / JSON / 字符画） |
-| 👤 用户 | **注册/登录**（`/#/login`）、**个人中心**（`/#/profile`：资料/改密/AI 用量/云同步/我的分享/注销）、**☁️ 跨设备云同步**（图纸/收藏/分组/豆仓库存，注册后自动同步，个人中心可手动同步）、**🛠 后台管理**（`/#/admin`，仅管理员：仪表盘/用户/图纸/分享/AI 用量/反馈/设置/日志/导出/**图纸库管理**（新增/推荐/标签/来源/下架）/**功能开关**（图纸库、图片转图纸、AI 生成、色卡、豆仓、分享 6 项可独立开关）/注册开关/**游客 AI 限额**） |
+| 👤 用户 | **注册/登录**（`/login`）、**个人中心**（`/profile`：资料/改密/AI 用量/云同步/我的分享/注销）、**☁️ 跨设备云同步**（图纸/收藏/分组/豆仓库存，注册后自动同步，个人中心可手动同步）、**🛠 后台管理**（`/admin`，仅管理员：仪表盘/用户/图纸/分享/AI 用量/反馈/设置/日志/导出/**图纸库管理**（新增/推荐/标签/来源/下架）/**功能开关**（图纸库、图片转图纸、AI 生成、色卡、豆仓、分享 6 项可独立开关）/注册开关/**游客 AI 限额**） |
 | ⬇ 导出 | 下载 PNG 图片 / PNG 色号版 / **综合图纸（图案+色号板+用量一张图）** / CSV 用豆统计 / 单页打印 / **A4 分区打印**（大图纸自动切成多页，可另存为 PDF） |
 
 ## 🛠 技术栈（规划）
 
 - **构建**：[Vite 7](https://vitejs.dev) + [Vue 3](https://vuejs.org)（`<script setup>` 组合式 API）+ TypeScript
-- **路由**：vue-router（Hash 模式，任意静态服务器/托管平台可直接部署，无需重写规则）
+- **路由**：vue-router（History 模式（网址无 #），任意静态服务器/托管平台可直接部署，无需重写规则）
 - **样式**：[Tailwind CSS v4](https://tailwindcss.com)（`@tailwindcss/vite` 插件）+ 少量自定义 CSS
 - **状态/持久化**：轻量响应式 store（`composables/useStore.ts`）+ `localStorage`，图纸/收藏/库存本地保存；登录后可通过后端云同步（`composables/useAuth.ts`）
 - **用户/后台**：`server/`（Express + node:sqlite + JWT + bcryptjs）提供注册登录、云同步、AI 用量、功能开关、游客限额、图纸库管理与后台管理 API；前端 `AuthView / ProfileView / AdminView` + `composables/useConfig.ts`（公开配置/功能开关）
@@ -64,7 +64,7 @@ src/
   data/         palettes/（6 大色卡 JSON）、palettes.ts、patterns.json（内置图纸）、patterns.ts
   utils/        color.ts（CIEDE2000）、quantize.ts（量化）、export.ts（PNG/CSV/打印）、storage.ts
   views/        Home / PatternDetail / Generator / Editor / Warehouse / Palette / My
-  router/       路由（Hash）
+  router/       路由（History）
   App.vue       顶部导航（带图标的大号导航栏）+ 页脚布局
 ```
 

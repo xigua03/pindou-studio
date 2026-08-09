@@ -1,6 +1,7 @@
 import type { BeadColor, BeadPalette } from '../types'
 import { hexToRgb } from '../utils/color'
 import { loadJSON, saveJSON } from '../utils/storage'
+import { fetchTimeout } from '../utils/api'
 
 import mard221Raw from './palettes/mard-221-github.json'
 import mard291Raw from './palettes/mard-291-github.json'
@@ -86,7 +87,7 @@ export function getPalette(id: string): BeadPalette | undefined {
  */
 export async function loadServerPalettes(): Promise<boolean> {
   try {
-    const res = await fetch('/api/palettes')
+    const res = await fetchTimeout('/api/palettes')
     if (!res.ok) return false
     const data = (await res.json()) as { palettes?: BeadPalette[] }
     const list = (data.palettes || []).filter((p) => p && p.id && Array.isArray(p.colors) && p.colors.length)

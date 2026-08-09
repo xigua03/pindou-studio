@@ -154,9 +154,9 @@
 - 鉴权：JWT（30 天）+ bcryptjs 密码哈希；`auth` / `adminOnly` 中间件
 
 ### 前端
-- `AuthView`（`/#/login`）：登录 / 注册切换，注册即自动云同步
-- `ProfileView`（`/#/profile`）：个人资料、修改密码、AI 用量、云同步按钮、我的分享链接（访问量/有效期/删除）、注销账号
-- `AdminView`（`/#/admin`）：多 Tab 后台（仪表盘/用户/图纸/分享/AI/反馈/设置/日志/导出），仅 admin 可见
+- `AuthView`（`/login`）：登录 / 注册切换，注册即自动云同步
+- `ProfileView`（`/profile`）：个人资料、修改密码、AI 用量、云同步按钮、我的分享链接（访问量/有效期/删除）、注销账号
+- `AdminView`（`/admin`）：多 Tab 后台（仪表盘/用户/图纸/分享/AI/反馈/设置/日志/导出），仅 admin 可见
 - 路由守卫：`/login` 已登录跳转个人中心；`/profile` `/admin` 未登录跳登录；`/admin` 非管理员拒访
 - 顶部导航右侧：未登录显示「登录」，登录后显示头像昵称下拉（个人中心 / 后台管理 / 退出）
 - AI 页：登录后显示「今日已用 X / Y 次」；游客显示「游客今日 X / Y 次」（guestId 存 localStorage），超出限额提示登录后可继续；`useConfig` 拉取 `/api/config` 控制功能开关与限额展示

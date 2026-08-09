@@ -201,7 +201,7 @@ app.post('/api/auth/forgot-password', async (req, res, next) => {
     const expiresAt = now() + 30 * 60 * 1000
     db.prepare('INSERT INTO password_resets (email, token, used, expires_at, created_at) VALUES (?,?,0,?,?)').run(em, token, expiresAt, now())
     const base = String(process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '') || 'http://localhost:5173'
-    const link = base + '/#/reset-password?token=' + encodeURIComponent(token) + '&email=' + encodeURIComponent(em)
+    const link = base + '/reset-password?token=' + encodeURIComponent(token) + '&email=' + encodeURIComponent(em)
     const html = mailShell('重置密码',
       '<p style="margin-top:0">你好，<b>' + escapeHtml(u.username) + '</b>：</p>' +
       '<p>我们收到了你找回密码的请求，请点击下方按钮重置密码。<b style="color:#ec4899">链接 30 分钟内有效</b>，逾期需重新申请。</p>' +

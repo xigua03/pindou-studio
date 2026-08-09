@@ -278,7 +278,7 @@ function openShare() {
   if (existingId && map[existingId]) {
     // 该图纸已生成过链接：直接显示已有链接，不让用户重复生成
     shareId.value = existingId
-    shareUrl.value = `${location.origin}${location.pathname}#/share/${existingId}`
+    shareUrl.value = `${location.origin}/share/${existingId}`
     shareOk.value = true
     // 检测该链接是否已同步到服务器（决定是否跨设备有效）
     remoteGetShare(existingId).then((r) => (shareRemote.value = !!r))
@@ -329,7 +329,7 @@ async function generateShare() {
   // 同步到服务器：成功则任何设备都能打开；失败则回退为仅本机浏览器
   const remoteOk = await remoteSaveShare(id, entry)
   shareRemote.value = remoteOk
-  shareUrl.value = `${location.origin}${location.pathname}#/share/${id}`
+  shareUrl.value = `${location.origin}/share/${id}`
   shareErr.value = ''
   shareHint.value = ''
   shareOk.value = true
@@ -659,7 +659,7 @@ function remove() {
       <p class="mt-1 text-xs leading-5 text-stone-500">生成一个短链接发给别人，对方打开即可查看并下载。编号为 5 位，可由大小写字母和数字组成。</p>
       <div v-if="!shareOk" class="mt-3 flex flex-wrap items-center gap-2">
         <div class="flex flex-1 items-center overflow-hidden rounded-xl ring-1 ring-stone-200 focus-within:ring-2 focus-within:ring-brand-400">
-          <span class="shrink-0 pl-3 text-xs text-stone-400">#/share/</span>
+          <span class="shrink-0 pl-3 text-xs text-stone-400">/share/</span>
           <input
             v-model="shareId"
             class="w-full min-w-0 border-0 bg-transparent px-1 py-2 font-mono text-sm text-stone-800 outline-none placeholder:text-stone-300"

@@ -6,7 +6,7 @@
 
 | 组件 | 说明 |
 | --- | --- |
-| 前端 | Vite 构建的纯静态文件（`dist/`），Hash 路由，由 **Nginx** 托管 |
+| 前端 | Vite 构建的纯静态文件（`dist/`），History 路由（无 #），由 **Nginx** 托管 |
 | 后端 | Express 服务，入口 `server/index.mjs`，默认端口 **8787**，由 **PM2** 守护 |
 | 数据库 | SQLite 单文件：`server/data/pindou.db`（首次启动自动创建并导入内置图纸/色卡） |
 | 数据目录 | `server/data/`（数据库 + 运行时数据，可整目录备份） |
@@ -145,7 +145,7 @@ server {
         client_max_body_size 30m;   # 云同步/后台导入大图需要
     }
 
-    # 前端静态资源（Hash 路由，无需 history 回退规则，保留兜底）
+    # 前端静态资源（History 路由：必须保留 try_files 回退，否则刷新/分享深链会 404）
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -153,6 +153,8 @@ server {
 ```
 
 3. 保存后点击「重载」Nginx。
+
+> 重要：站点已使用 History 路由（网址不再带 `#/`）。上面的 `location / { try_files $uri $uri/ /index.html; }` 必须保留（宝塔可用「伪静态」配置），否则刷新页面或直接打开分享链接会报 404。
 
 > 注意：`root` 必须指向构建产物 `dist/`，而不是项目根目录。
 
