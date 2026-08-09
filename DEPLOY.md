@@ -183,7 +183,7 @@ server {
 
 ## 八·五、更新已部署站点（每次发版后）
 
-`ash
+```bash
 # 1. 进入项目目录
 cd /www/wwwroot/pindou
 
@@ -203,16 +203,14 @@ pm2 restart pindou
 
 # 6. 验证
 curl http://127.0.0.1:8787/api/health   # 期望返回 {"ok":true,"ai":true,"maintenance":false}
-`
+```
 
 > 说明：
-> - server/data/（SQLite 数据库：用户/图纸/分享/后台配置）与 .env（AI Key、SMTP、端口）都被 .gitignore 排除，git pull **不会**动它们，你的数据与密钥全部保留。
-> - 前端是纯静态 dist/，Nginx **无需重启**；用户在浏览器强刷一次（Ctrl+F5）即可看到新版。
-> - 服务器没装 git 时，也可用宝塔「网站 → 版本管理」的 Git 功能拉取，或先 yum install -y git。
-> - 若 
-pm run build 报内存不足：NODE_OPTIONS=--max-old-space-size=2048 npm run build。
-> - 如果只想更新后端（不涉及前端改动），可跳过第 4 步的 
-pm run build。
+> - `server/data/`（SQLite 数据库：用户/图纸/分享/后台配置）与 `.env`（AI Key、SMTP、端口）都被 `.gitignore` 排除，`git pull` **不会**动它们，你的数据与密钥全部保留。
+> - 前端是纯静态 `dist/`，Nginx **无需重启**；用户在浏览器强刷一次（Ctrl+F5）即可看到新版。
+> - 服务器没装 git 时，也可用宝塔「网站 → 版本管理」的 Git 功能拉取，或先 `yum install -y git`。
+> - 若 `npm run build` 报内存不足：`NODE_OPTIONS=--max-old-space-size=2048 npm run build`。
+> - 如果只想更新后端（不涉及前端改动），可跳过第 4 步的 `npm run build`。
 
 ## 九、日常运维
 
