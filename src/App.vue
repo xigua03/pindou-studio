@@ -29,6 +29,7 @@ function onDocClick(e: MouseEvent) {
 const theme = ref<'light' | 'dark'>(
   typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
 )
+const appVersion = '1.2.0'
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.setAttribute('data-theme', theme.value)
@@ -225,7 +226,7 @@ function logout() {
 
     <footer class="no-print border-t border-stone-200 bg-white">
       <div class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-stone-400">
-        <p>🧩 拼豆工坊</p>
+        <p>🧩 拼豆工坊 <span class="ml-1 text-stone-300">v{{ appVersion }}</span></p>
       </div>
     </footer>
   </div>
