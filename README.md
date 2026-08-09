@@ -6,7 +6,7 @@
 
 ### 🏠 图纸库
 - 内置 **56 张像素图纸**，支持后台新增、上架/下架、推荐置顶、维护标签与来源
-- 支持从外部画廊站点**采集入库**（Perler 等，可勾选来源、预览后再导入）
+- 支持从外部画廊站点**采集入库**（Perler、BeadPattern、BeadsCanvas、MakeBead 等，可勾选来源、预览后再导入）
 - 搜索、标签筛选、**难度 / 豆数筛选**、分页浏览（默认每页 16 张，每页数量可调）
 
 ### 🖼️ 图片转图纸
@@ -124,7 +124,7 @@ server/
   app.mjs        业务路由（auth / sync / share / ai / points / admin / collect / update…）
   auth.mjs       JWT + 密码哈希
   db.mjs         建库与种子数据（node:sqlite）
-  collector.mjs  图纸采集（Perler 等画廊站点）
+  collector.mjs  图纸采集（Perler / BeadPattern / BeadsCanvas / MakeBead 等画廊站点，支持直取完整网格）
   update.mjs     在线更新（git 拉取 + 构建 + PM2 重启 + 状态/日志）
 scripts/         smoke / deep-test / screenshots 测试脚本、预构建清理
 ```
