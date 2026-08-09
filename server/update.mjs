@@ -140,6 +140,15 @@ export async function getUpdateStatus() {
   }
   const latestLabel = latestVersion || (remoteCommit ? remoteCommit + ' (' + (branch || 'main') + ')' : '')
   const hasUpdate = !!(latestVersion && cmpVersions(latestVersion, current) > 0) || !!(remoteCommit && remoteCommit !== localCommit)
+  // 僵尸状态识别：标记 running 但超过 30 分钟无进展（单步最长 20 分钟），视为上次更新被中断
+  let running = !!(status && status.running)
+  let stale = false
+  if (running && status.startedAt) {
+    if (Date.now() - Number(status.startedAt) > 30 * 60 * 1000) {
+      running = false
+      stale = true
+    }
+  }
   return {
     ok: true,
     current,
@@ -152,10 +161,27 @@ export async function getUpdateStatus() {
     localCommit,
     remoteCommit,
     branch,
-    running: !!(status && status.running),
+    running,
+    stale,
     status: status || null,
     logTail
   }
+}
+
+/** 重置更新状态：仅当没有真正在跑（非 running 或已僵尸）时允许清除 */
+export function resetUpdateStatus() {
+  const status = readJson(STATUS_FILE, null)
+  if (status && status.running) {
+    const started = Number(status.startedAt) || 0
+    if (Date.now() - started < 30 * 60 * 1000) {
+      return { ok: false, error: '更新任务正在执行中，无法重置' }
+    }
+  }
+  try {
+    fs.rmSync(STATUS_FILE, { force: true })
+  } catch { /* ignore */ }
+  appendLog('已手动重置更新状态（上次任务疑似中断）')
+  return { ok: true }
 }
 
 export function startUpdate(opts) {

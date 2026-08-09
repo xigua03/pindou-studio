@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { db, initDb } from './db.mjs'
 import { hashPassword, verifyPassword, signToken, auth, adminOnly, optionalAuth } from './auth.mjs'
 import { collectOnce, collectPreviewItems, importPreviewItems, COLLECT_SOURCES } from './collector.mjs'
-import { getUpdateStatus, startUpdate } from './update.mjs'
+import { getUpdateStatus, startUpdate, resetUpdateStatus } from './update.mjs'
 import { sendMail as smtpSendMail } from './smtp.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1306,6 +1306,18 @@ app.post('/api/admin/update/run', auth, adminOnly, (req, res) => {
     const r = startUpdate({ pm2Name })
     if (!r.ok) return res.status(400).json(r)
     log(req.user.uid, 'admin_update_run', '启动在线更新 pm2=' + pm2Name, req)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })
+  }
+})
+
+/* 在线更新：重置疑似中断的更新状态 */
+app.post('/api/admin/update/reset', auth, adminOnly, (req, res) => {
+  try {
+    const r = resetUpdateStatus()
+    if (!r.ok) return res.status(400).json(r)
+    log(req.user.uid, 'admin_update_reset', '重置更新状态', req)
     res.json(r)
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })

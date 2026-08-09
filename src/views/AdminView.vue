@@ -1187,6 +1187,7 @@ interface UpdateStatus {
   remoteCommit: string
   branch: string
   running: boolean
+  stale: boolean
   status: { running?: boolean; step?: string; stepStartedAt?: number; startedAt?: number; ok?: boolean; error?: string } | null
   logTail: string
 }
@@ -1235,6 +1236,14 @@ async function runUpdateNow() {
     updMsg.value = '更新任务已启动，正在后台执行…'
     await loadUpdate()
     pollUpdate()
+  })
+}
+async function resetUpdateState() {
+  if (!window.confirm('确定要重置更新状态吗？\n将清除上次疑似中断的更新记录（不会影响代码与数据）。')) return
+  await run(async () => {
+    await api('/admin/update/reset', { method: 'POST' })
+    updMsg.value = '更新状态已重置'
+    await loadUpdate()
   })
 }
 
@@ -2092,6 +2101,10 @@ async function runUpdateNow() {
           <template v-else-if="upd.hasUpdate">✨ 发现新版本 {{ upd.latestVersion }}（当前 {{ upd.current }}）</template>
           <template v-else-if="upd.latestVersion">✅ 已是最新版本（{{ upd.current }}）</template>
           <template v-else>ℹ️ 尚未获取到远程版本信息（请检查服务器能否访问 GitHub）</template>
+        </div>
+        <div v-if="upd?.stale" class="flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <span>⚠️ 上次更新疑似中断（已运行超过 30 分钟无进展），可重置状态后重新检查。</span>
+          <button class="rounded-md bg-amber-500 px-2.5 py-1 font-medium text-white hover:bg-amber-600" :disabled="loading" @click="resetUpdateState">重置更新状态</button>
         </div>
         <p v-if="updMsg" class="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{{ updMsg }}</p>
         <p v-if="upd?.localCommit && !upd?.latestTag" class="text-[11px] text-stone-400">本地提交 {{ upd.localCommit }} · 远程 {{ upd.remoteCommit || '未知' }}（{{ upd.branch || 'main' }} 分支）</p>
