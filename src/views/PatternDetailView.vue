@@ -21,7 +21,8 @@ import {
   computeShoppingList,
   printShoppingList,
   exportShoppingCSV,
-  renderBoardLayout
+  renderBoardLayout,
+  composeWithTopQr
 } from '../utils/export'
 import { buildPatternFromRows, convertPatternPalette } from '../utils/quantize'
 import { remoteSaveShare, remoteDeleteShare, remoteGetShare } from '../utils/shareApi'
@@ -64,6 +65,7 @@ const showBom = ref(false)
 const beadPrice = ref(Number(loadJSON('bead_price', 0.05)) || 0.05)
 const showShare = ref(false)
 const shareUrl = ref('')
+const qrOn = ref(true) // 下载图纸图片时在顶部生成二维码
 const shareCopied = ref(false)
 const bomItems = computed(() =>
   pattern.value && palette.value
@@ -363,7 +365,7 @@ async function copyGrid() {
 
 function downloadPNG(withCodes: boolean) {
   if (!pattern.value || !palette.value) return
-  const canvas = patternToCanvas(pattern.value, palette.value, {
+  let canvas = patternToCanvas(pattern.value, palette.value, {
     cellSize: 24,
     showCodes: withCodes,
     showGrid: true,
@@ -372,6 +374,7 @@ function downloadPNG(withCodes: boolean) {
     showCoords: true,
     boardSize: boardSize.value
   })
+  if (qrOn.value) canvas = composeWithTopQr(canvas, shareUrl.value || `${location.origin}${location.pathname}`)
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}${withCodes ? '-色号版' : ''}.png`)
 }
 
@@ -409,7 +412,8 @@ function printA4() {
 
 function downloadSheet() {
   if (!pattern.value || !palette.value) return
-  const canvas = renderPatternSheet(pattern.value, palette.value, { showCoords: true, boardSize: boardSize.value })
+  let canvas = renderPatternSheet(pattern.value, palette.value, { showCoords: true, boardSize: boardSize.value })
+  if (qrOn.value) canvas = composeWithTopQr(canvas, shareUrl.value || `${location.origin}${location.pathname}`)
   downloadCanvas(canvas, `${safeFileName(pattern.value.name)}-图纸+色号统计.png`)
 }
 
@@ -493,6 +497,10 @@ function remove() {
         <button class="btn btn-primary" @click="edit">✏️ 编辑</button>
         <button v-if="isSaved" class="btn btn-danger" @click="remove">🗑 删除</button>
       </div>
+      <label class="mt-2 inline-flex cursor-pointer select-none items-center gap-1.5 text-xs text-stone-500">
+        <input v-model="qrOn" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
+        <span>图片顶部生成二维码（下载图 / 色号版 / 图纸+色号统计）</span>
+      </label>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[1fr_320px]">

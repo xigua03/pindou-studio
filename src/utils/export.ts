@@ -1,5 +1,6 @@
 import type { BeadPalette, ColorUsage, Pattern } from '../types'
 import { contrastText } from './color'
+import qrcode from 'qrcode-generator'
 
 export function computeColorUsage(pattern: Pattern): ColorUsage[] {
   const map = new Map<string, ColorUsage>()
@@ -807,4 +808,62 @@ export function exportShoppingCSV(pattern: Pattern, palette: BeadPalette, items:
     lines.push(`预估费用（单价 ${pricePerBead.toFixed(3)} 元/颗）:${(totalNeed * pricePerBead).toFixed(2)}`)
   }
   return '\uFEFF' + lines.join('\r\n')
+}
+
+
+/** 生成二维码 canvas（白底黑模块），失败返回 null */
+function makeQrCanvas(text: string, cellSize = 8, margin = 4): HTMLCanvasElement | null {
+  try {
+    const qr = qrcode(0, 'M')
+    qr.addData(text)
+    qr.make()
+    const n = qr.getModuleCount()
+    const c = document.createElement('canvas')
+    c.width = (n + margin * 2) * cellSize
+    c.height = c.width
+    const ctx = c.getContext('2d')
+    if (!ctx) return null
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, c.width, c.height)
+    ctx.translate(margin * cellSize, margin * cellSize)
+    qr.renderTo2dContext(ctx, cellSize)
+    return c
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 在图纸图片顶部合成一条二维码区（白底）：左侧二维码，右侧提示文字 + 链接。
+ * 适用于「下载图 / 色号版 / 图纸+色号统计」等图片导出。
+ */
+export function composeWithTopQr(canvas: HTMLCanvasElement, url: string): HTMLCanvasElement {
+  const qr = makeQrCanvas(url)
+  if (!qr) return canvas
+  const pad = 14
+  const gap = 18
+  const qrSize = qr.width
+  const stripH = qrSize + pad * 2
+  const out = document.createElement('canvas')
+  out.width = Math.max(canvas.width, qrSize + gap + 230)
+  out.height = canvas.height + stripH
+  const ctx = out.getContext('2d')
+  if (!ctx) return canvas
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, out.width, out.height)
+  ctx.drawImage(qr, pad, pad)
+  const textX = pad + qrSize + gap
+  const centerY = stripH / 2
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#1f2937'
+  ctx.font = '600 22px "Microsoft YaHei", "PingFang SC", sans-serif'
+  ctx.fillText('扫码查看 / 分享此图纸', textX, centerY - 14)
+  ctx.fillStyle = '#6b7280'
+  ctx.font = '13px "Microsoft YaHei", "PingFang SC", sans-serif'
+  const maxUrl = Math.max(20, Math.floor((out.width - textX - pad) / 7.2))
+  const urlText = url.length > maxUrl ? url.slice(0, maxUrl - 1) + '…' : url
+  ctx.fillText(urlText, textX, centerY + 16)
+  ctx.drawImage(canvas, 0, stripH)
+  return out
 }
