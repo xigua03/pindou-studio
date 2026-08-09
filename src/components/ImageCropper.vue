@@ -208,30 +208,7 @@ function handleStyle(h: (typeof handles)[number]) {
 <template>
   <div class="space-y-2">
     <div class="flex items-center justify-between gap-2 text-xs text-stone-500">
-      <span class="font-medium">✂️ 裁剪范围（拖拽选区移动，拖拽四角/四边缩放）</span>
-      <div class="flex shrink-0 gap-1.5">
-        <button
-          type="button"
-          class="rounded-md bg-stone-100 px-2 py-1 text-[11px] font-medium hover:bg-stone-200"
-          @click="emit('update:modelValue', fullRect())"
-        >
-          重置整图
-        </button>
-        <button
-          type="button"
-          class="rounded-md bg-brand-50 px-2 py-1 text-[11px] font-medium text-brand-600 hover:bg-brand-100"
-          @click="emit('update:modelValue', null); emit('cancel')"
-        >
-          不裁剪
-        </button>
-        <button
-          type="button"
-          class="rounded-md bg-brand-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-brand-600"
-          @click="onConfirm"
-        >
-          完成
-        </button>
-      </div>
+      <span class="font-medium">✂️ 裁剪范围（拖拽选区移动，拖拽四角/四边缩放；下方「重置整图」可恢复全图）</span>
     </div>
 
     <div
@@ -254,7 +231,7 @@ function handleStyle(h: (typeof handles)[number]) {
       <template v-if="rect">
         <div
           class="absolute cursor-move border-2 border-white ring-1 ring-black/30"
-          :style="[rectStyle, { boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)' }]"
+          :style="[rectStyle, { boxShadow: '0 0 0 9999px rgba(0,0,0,0.4)' }]"
           @pointerdown="onDown($event, 'move')"
         >
           <div

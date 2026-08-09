@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Pattern, BeadPalette } from '../types'
+import { downloadCanvas } from '../utils/export'
 
 const props = defineProps<{ pattern: Pattern; palette: BeadPalette }>()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -91,10 +92,7 @@ function render() {
 function downloadPNG() {
   const canvas = canvasRef.value
   if (!canvas) return
-  const a = document.createElement('a')
-  a.href = canvas.toDataURL('image/png')
-  a.download = `${props.pattern.name}-3D预览.png`
-  a.click()
+  void downloadCanvas(canvas, `${props.pattern.name}-3D预览.png`)
 }
 
 onMounted(() => {

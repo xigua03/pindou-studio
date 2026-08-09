@@ -2,7 +2,7 @@
 import { computed, ref, watch, onMounted } from 'vue'
 import type { Pattern, BeadPalette } from '../types'
 import { contrastText } from '../utils/color'
-import { drawCoordFrame } from '../utils/export'
+import { drawCoordFrame, coordStripWidth } from '../utils/export'
 
 const props = withDefaults(
   defineProps<{
@@ -70,8 +70,9 @@ function drawCanvas() {
   const canvas = canvasRef.value
   if (!canvas) return
   const cell = props.cellSize
-  const leftW = props.showCoords ? cell : 0
-  const topH = props.showCoords ? cell : 0
+  const strip = props.showCoords ? coordStripWidth(cell, Math.max(props.pattern.width, props.pattern.height)) : 0
+  const leftW = props.showCoords ? strip : 0
+  const topH = props.showCoords ? strip : 0
   canvas.width = leftW + props.pattern.width * cell
   canvas.height = topH + props.pattern.height * cell
   const ctx = canvas.getContext('2d')
@@ -117,7 +118,7 @@ function drawCanvas() {
     }
   }
   if (props.showCoords) {
-    drawCoordFrame(ctx, props.pattern, cell, leftW, topH, { x: 0, y: 0, w: props.pattern.width, h: props.pattern.height }, { boardSize: props.boardSize })
+    drawCoordFrame(ctx, props.pattern, cell, leftW, topH, { x: 0, y: 0, w: props.pattern.width, h: props.pattern.height }, { boardSize: props.boardSize, strip })
   }
 }
 

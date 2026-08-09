@@ -32,8 +32,30 @@ export interface RenderOptions {
 
 /** 把图纸渲染到 canvas（返回 canvas 与下载用的 dataURL） */
 
+/** Coordinate font size (px) for the row/column numbers. */
+function coordFontSize(cellSize: number): number {
+  return Math.max(8, Math.round(cellSize * 0.45))
+}
+
+/** Estimated pixel width of the largest coordinate number at the given cell size. */
+function coordNumberWidth(cellSize: number, maxCoord: number): number {
+  const fs = coordFontSize(cellSize)
+  return String(maxCoord).length * fs * 0.62
+}
+
+/** Coordinate strip width (px) needed to fully show the largest row/column number. */
+export function coordStripWidth(cellSize: number, maxCoord: number): number {
+  return Math.max(cellSize, Math.ceil(coordNumberWidth(cellSize, maxCoord) + 8))
+}
+
+/** Whether every cell should be numbered (false -> number every 5 cells to avoid overlap). */
+function coordNumberEveryCell(cellSize: number, maxCoord: number): boolean {
+  return coordNumberWidth(cellSize, maxCoord) <= cellSize
+}
+
 /** Draw a coordinate frame for a pattern region: reference lines (every 5 cells
- *  and every boardSize cells) plus row/column numbers along the top and left edges. */
+ *  and every boardSize cells) plus row/column numbers along the top and left edges.
+ *  The strip is sized automatically so multi-digit numbers (>99) are never clipped. */
 export function drawCoordFrame(
   ctx: CanvasRenderingContext2D,
   pattern: Pattern,
@@ -43,8 +65,12 @@ export function drawCoordFrame(
   region: { x: number; y: number; w: number; h: number },
   opts: { boardSize?: number; minorEvery?: number; strip?: number } = {}
 ): void {
-  const { boardSize = 0, minorEvery = 5, strip = cellSize } = opts
+  const { boardSize = 0, minorEvery = 5 } = opts
   const { x: rx, y: ry, w: rw, h: rh } = region
+  const maxCoord = Math.max(rx + rw, ry + rh)
+  const strip = opts.strip ?? coordStripWidth(cellSize, maxCoord)
+  const stepX = coordNumberEveryCell(cellSize, maxCoord) ? 1 : 5
+  const fontSize = coordFontSize(cellSize)
   ctx.save()
   // minor reference lines every 5 cells (faint red, like perlerbeads)
   if (minorEvery > 1) {
@@ -89,11 +115,13 @@ export function drawCoordFrame(
   }
   // row / column coordinate numbers
   if (strip > 0) {
-    ctx.font = '600 ' + Math.max(8, Math.round(cellSize * 0.45)) + 'px ui-monospace, "Microsoft YaHei", sans-serif'
+    ctx.font = `600 ${fontSize}px ui-monospace, "Microsoft YaHei", sans-serif`
     ctx.fillStyle = '#6b7280'
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'center'
     for (let cx = 0; cx < rw; cx++) {
+      // number every cell when it fits, otherwise every 5 cells (plus first & last)
+      if (stepX > 1 && cx !== 0 && (cx + 1) % stepX !== 0 && cx !== rw - 1) continue
       ctx.fillText(String(rx + cx + 1), ox + cx * cellSize + cellSize / 2, oy - strip / 2)
     }
     ctx.textAlign = 'right'
@@ -118,8 +146,9 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
   } = opts
   const byCode = new Map(palette.colors.map((c) => [c.code, c]))
   const r = region ?? { x: 0, y: 0, w: pattern.width, h: pattern.height }
-  const leftW = showCoords ? cellSize : 0
-  const topH = showCoords ? cellSize : 0
+  const strip = showCoords ? coordStripWidth(cellSize, Math.max(r.x + r.w, r.y + r.h)) : 0
+  const leftW = showCoords ? strip : 0
+  const topH = showCoords ? strip : 0
   const innerW = r.w * cellSize
   const innerH = r.h * cellSize
   const canvas = document.createElement('canvas')
@@ -166,12 +195,71 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
     }
   }
   if (showCoords) {
-    drawCoordFrame(ctx, pattern, cellSize, padding + leftW, padding + topH, r, { boardSize })
+    drawCoordFrame(ctx, pattern, cellSize, padding + leftW, padding + topH, r, { boardSize, strip })
   }
   return canvas
 }
 
-export function downloadCanvas(canvas: HTMLCanvasElement, filename: string): void {
+function isTouchMobile(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+}
+
+type ShareableNavigator = Navigator & {
+  canShare?: (data?: ShareData) => boolean
+  share?: (data?: ShareData) => Promise<void>
+}
+
+/** 移动端优先调起系统分享/存储（iOS Safari 不支持 a[download]），桌面端直接下载 */
+async function saveBlob(blob: Blob, filename: string): Promise<void> {
+  const nav = navigator as ShareableNavigator
+  const mobile = isTouchMobile()
+  if (mobile && nav.canShare && nav.share) {
+    try {
+      const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' })
+      if (nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: filename })
+        return
+      }
+    } catch {
+      // 用户取消系统分享：视为完成，不再重复触发下载
+      return
+    }
+  }
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.rel = 'noopener'
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // iOS 无 a[download] 且无法分享时：新窗口打开，便于长按保存
+    if (mobile && /iphone|ipad|ipod/i.test(navigator.userAgent)) {
+      try {
+        window.open(url, '_blank')
+      } catch {
+        /* ignore */
+      }
+    }
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  }
+}
+
+export async function downloadCanvas(canvas: HTMLCanvasElement, filename: string): Promise<void> {
+  try {
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (blob) {
+      await saveBlob(blob, filename)
+      return
+    }
+  } catch {
+    /* fall through */
+  }
+  // 兜底：老浏览器用 dataURL
   const a = document.createElement('a')
   a.href = canvas.toDataURL('image/png')
   a.download = filename
@@ -181,17 +269,9 @@ export function downloadCanvas(canvas: HTMLCanvasElement, filename: string): voi
   a.remove()
 }
 
-export function downloadText(text: string, filename: string, mime = 'text/plain;charset=utf-8'): void {
+export async function downloadText(text: string, filename: string, mime = 'text/plain;charset=utf-8'): Promise<void> {
   const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.style.display = 'none'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 2000)
+  await saveBlob(blob, filename)
 }
 
 /** 导出用豆统计 CSV（Excel 可直接打开） */
@@ -282,7 +362,7 @@ export function renderPatternSheet(pattern: Pattern, palette: BeadPalette, opts:
   const usage = computeColorUsage(pattern)
   const total = usage.reduce((s, u) => s + u.count, 0)
 
-  const cell = opts.cellSize ?? Math.max(10, Math.min(22, Math.floor(840 / Math.max(pattern.width, 1))))
+  const cell = opts.cellSize ?? Math.max(10, Math.min(24, Math.floor(1040 / Math.max(pattern.width, 1))))
   const gridCanvas = patternToCanvas(pattern, palette, {
     cellSize: cell,
     showCodes: true,
@@ -499,7 +579,7 @@ export function renderBoardLayout(
   const totalBoards = bx * by
 
   const cell = opts.cellSize ?? Math.max(5, Math.min(14, Math.floor(1500 / Math.max(pattern.width, boardSize))))
-  const strip = cell
+  const strip = coordStripWidth(cell, Math.max(pattern.width, pattern.height))
   const pad = 16
   const headerH = 58
   const footerH = 26

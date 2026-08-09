@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -40,11 +40,11 @@ const showMargin = ref(true) // 底板外围留空显示（预览/下载按底�
 const sharpen = ref(true) // 边缘锐化
 // 图片细节丰富度：缩到 128 宽后统计的独特颜色数，越高越复杂（照片数百上千，卡通几十）
 const detailScore = ref(0)
-const suggestedWidth = ref(0)
 const detailNote = ref('')
 // 上传前裁剪
 const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
+const cropOpen = ref(false) // 裁剪面板是否展开（确认后收起面板但保留裁剪选区）
 // 对比度（-50 ~ +50，0 不变）
 const contrast = ref(10)
 // 亮度（-50 ~ +50，0 不变）
@@ -52,25 +52,16 @@ const brightness = ref(0)
 // 饱和度（0.5 ~ 2.0，1 不变；默认 1.3 增强）
 const saturate = ref(1.3)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
-const maxColors = ref(32)
+const maxColors = ref(48)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
 const outline = ref(false)
-const protectDark = ref(true) // keep thin dark lines (whiskers/outlines), default on// 去杂点：清理孤立的单色噪点，让画面更干净
+const protectDark = ref(true) // keep thin dark lines (whiskers/outlines), default on
+// 去杂点：清理孤立的单色噪点，让画面更干净
 const denoise = ref(true)
 // 仅用手头颜色（豆仓）
 const onlyOwnedColors = ref(false)
-// 底板尺寸（板数规划）
-const boardSize = ref(29)
-// 宽度对齐底板：输出宽度吸附到整板倍数（如 29/58/87…）
-const alignBoard = ref(true)
-
-// 切换底板尺寸时，把当前宽度重新吸附到新底板的整板倍数
-watch(boardSize, (b) => {
-  if (alignBoard.value && width.value > 0 && b > 0) {
-    width.value = Math.max(1, Math.round(width.value / b)) * b
-  }
-  computeSuggestion()
-})
+// 底板尺寸（固定 29×29 标准板）：仅用于结果区的底板排布参考与外围留空显示，不向用户暴露「板数」参数
+const boardSize = 29
 // 颜色优化
 const mergeThreshold = ref(0)
 const noiseMin = ref(0)
@@ -129,17 +120,6 @@ const outputSize = computed(() => {
     outH = 256
     outW = Math.max(8, Math.round((256 * w) / h))
   }
-  // 宽度对齐底板：吸附到整板倍数，避免出现"不满一块板又超一块板"的宽度
-  if (alignBoard.value && boardSize.value > 0) {
-    const b = boardSize.value
-    const boards = Math.max(1, Math.round(outW / b))
-    outW = boards * b
-    outH = Math.max(8, Math.round((outW * h) / w))
-    if (outH > 256) {
-      outH = 256
-      outW = Math.max(b, Math.round((256 * w) / h / b) * b)
-    }
-  }
   return { w: outW, h: outH }
 })
 
@@ -163,12 +143,12 @@ function padToBoard(rows: string[][], b: number): string[][] {
 const displayPattern = computed(() => {
   if (!result.value) return null
   let rows = result.value.rows
-  if (showMargin.value) rows = padToBoard(rows, boardSize.value)
+  if (showMargin.value) rows = padToBoard(rows, boardSize)
   return { ...result.value, rows: applyRemap(rows, remapMap.value), width: rows[0]?.length ?? 0, height: rows.length }
 })
 const marginInfo = computed(() => {
   if (!result.value || !showMargin.value) return null
-  const b = boardSize.value
+  const b = boardSize
   const tw = Math.ceil(result.value.width / b) * b
   const th = Math.ceil(result.value.height / b) * b
   return { tw, th, right: tw - result.value.width, bottom: th - result.value.height }
@@ -187,7 +167,7 @@ const ownedColorCount = computed(() => {
 const boardInfo = computed(() => {
   const pat = displayPattern.value
   if (!pat) return null
-  const b = boardSize.value
+  const b = boardSize
   const bx = Math.ceil(pat.width / b)
   const by = Math.ceil(pat.height / b)
   return { b, bx, by, total: bx * by }
@@ -272,53 +252,36 @@ function estimateDetail(el: HTMLImageElement, src?: { x: number; y: number; w: n
   return cols.size
 }
 
-function computeSuggestion() {
-  if (!image.value) {
-    suggestedWidth.value = 0
-    return
-  }
-  const b = boardSize.value
-  let base = Math.round(image.value.w / 3)
-  base = Math.min(base, b * 4)
-  base = Math.max(base, b)
-  const maxW = alignBoard.value ? Math.max(b, Math.floor(256 / b) * b) : 256
-  base = Math.min(base, maxW)
-  if (alignBoard.value) base = Math.round(base / b) * b
-  base = Math.min(base, maxW)
-  suggestedWidth.value = base
-}
-
 const isComplex = computed(() => detailScore.value >= 200)
 
-function applySuggestion() {
-  if (!image.value || suggestedWidth.value <= 0) return
-  width.value = suggestedWidth.value
-  detailNote.value = ''
-  generate()
+/** 按图片细节复杂度自动选择默认图纸尺寸档位（标准版/大板/超大版） */
+function pickTier(detail: number): { label: string; width: number } {
+  if (detail < 50) return { label: '标准版', width: 58 }
+  if (detail < 170) return { label: '大板', width: 87 }
+  return { label: '超大版', width: 116 }
 }
 
 function applyLoadedImage(el: HTMLImageElement, name: string) {
   cropEnabled.value = false
   cropRect.value = null
+  cropOpen.value = false
   image.value = { el, name, w: el.naturalWidth, h: el.naturalHeight }
   resultName.value = name || '我的拼豆图纸'
   // 自动检测背景色（四角中位色）
   bgColor.value = rgbTripleToHex(detectBackgroundColor(el))
-  // 默认宽度按图片尺寸自适应（约 1/4 宽，48-110 之间）；先估算细节复杂度
-  const rawW = Math.max(48, Math.min(110, Math.round(el.naturalWidth / 4)))
+  // 默认宽度按图片复杂度自动选档：标准版 58 / 大板 87 / 超大版 116（不再让用户手动选板数）
   detailScore.value = estimateDetail(el)
-  // 默认：简单图 2 板起步（约 58 豆宽，细节与工作量平衡），细节复杂的图最多给 4 板
-  let boards = Math.max(1, Math.round(rawW / boardSize.value))
-  if (detailScore.value < 200) boards = Math.min(boards, 2)
-  width.value = alignBoard.value ? Math.max(boardSize.value, boards * boardSize.value) : rawW
-  result.value = null
-  computeSuggestion()
-  if (isComplex.value && suggestedWidth.value > width.value) {
-    width.value = suggestedWidth.value
-    detailNote.value = '自动按图片细节建议了 ' + Math.round(suggestedWidth.value / boardSize.value) + ' 板宽度，保留更多细节（可手动调小）。'
-  } else {
-    detailNote.value = ''
+  const tier = pickTier(detailScore.value)
+  let targetWidth = tier.width
+  // 有纯色背景且默认开启「背景留空 + 自动裁剪」时，按主体占比放大网格，
+  // 让裁剪后的主体实际宽度达到档位宽度（避免白边图生成出来的主体过小、细节不足）
+  if (removeBg.value && autoCrop.value && !isPixelArt(el)) {
+    const ratio = estimateContentRatio(el)
+    targetWidth = Math.min(256, Math.max(tier.width, Math.round(tier.width / ratio)))
   }
+  width.value = targetWidth
+  result.value = null
+  detailNote.value = `已按图片细节自动选择「${tier.label}」：${targetWidth} 豆宽`
 }
 
 async function onFile(file: File | undefined) {
@@ -355,10 +318,33 @@ function autoBg() {
 }
 
 function onCropToggle() {
-  // 开启裁剪时默认框选整图，方便直接缩小/移动
-  if (cropEnabled.value && !cropRect.value && image.value) {
-    cropRect.value = { x: 0, y: 0, w: image.value.w, h: image.value.h }
+  if (cropEnabled.value) {
+    // 开启裁剪：展开面板，默认框选整图方便直接缩小/移动
+    cropOpen.value = true
+    if (!cropRect.value && image.value) {
+      cropRect.value = { x: 0, y: 0, w: image.value.w, h: image.value.h }
+    }
+  } else {
+    // 关闭裁剪：清空选区
+    cropOpen.value = false
+    cropRect.value = null
   }
+}
+
+function onCropConfirm() {
+  // 完成裁剪：收起面板但保留裁剪区域，生成时使用该区域
+  cropOpen.value = false
+}
+
+function onCropCancel() {
+  cropOpen.value = false
+  cropEnabled.value = false
+  cropRect.value = null
+}
+
+function resetCrop() {
+  if (!image.value) return
+  cropRect.value = { x: 0, y: 0, w: image.value.w, h: image.value.h }
 }
 
 async function generate() {
@@ -523,7 +509,7 @@ function downloadPNG(withCodes: boolean) {
     background: '#ffffff',
     padding: 8,
     showCoords: true,
-    boardSize: boardSize.value
+    boardSize
   })
   downloadCanvas(canvas, `${safeFileName(pat.name)}${withCodes ? '-色号版' : ''}.png`)
 }
@@ -548,14 +534,14 @@ function edit() {
 function downloadSheet() {
   const pat = displayPattern.value
   if (!pat) return
-  const canvas = renderPatternSheet(pat, palette.value, { showCoords: true, boardSize: boardSize.value })
+  const canvas = renderPatternSheet(pat, palette.value, { showCoords: true, boardSize })
   downloadCanvas(canvas, `${safeFileName(pat.name)}-图纸+色号统计.png`)
 }
 
 function printA4() {
   const pat = displayPattern.value
   if (!pat) return
-  printPatternTiled(pat, palette.value, { cellSize: 14, showCoords: true, boardSize: boardSize.value })
+  printPatternTiled(pat, palette.value, { cellSize: 14, showCoords: true, boardSize })
 }
 </script>
 
@@ -601,25 +587,37 @@ function printA4() {
           <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
             <input v-model="cropEnabled" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" @change="onCropToggle" /> 裁剪图片（生成前）
           </label>
-          <div v-if="cropEnabled" class="rounded-xl bg-stone-50 p-3">
+          <div v-if="cropEnabled && cropRect && !cropOpen" class="flex items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
+            <span class="font-medium">✂️ 已裁剪 {{ cropRect.w }}×{{ cropRect.h }} px，生成时将只使用该区域</span>
+            <button type="button" class="shrink-0 rounded-md bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-600" @click="cropOpen = true">
+              重新裁剪
+            </button>
+          </div>
+
+          <div v-if="cropOpen" class="rounded-xl border border-stone-200 bg-stone-50 p-3">
             <ImageCropper
               v-model="cropRect"
               :src="image.el.src"
               :image-w="image.w"
               :image-h="image.h"
-              @confirm="cropEnabled = false"
-              @cancel="cropEnabled = false; cropRect = null"
+              @confirm="onCropConfirm"
+              @cancel="onCropCancel"
             />
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <span class="text-[11px] text-stone-400">拖动选区移动，拖动四角/四边缩放；回车或右键完成裁剪</span>
-              <div class="flex gap-2">
-                <button type="button" class="rounded-md bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-200" @click="cropEnabled = false; cropRect = null">
-                  取消裁剪
-                </button>
-                <button type="button" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" @click="cropEnabled = false">
-                  完成裁剪
+            <div class="mt-3 rounded-lg border border-stone-200 bg-white p-2 shadow-sm">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <button type="button" class="rounded-md border border-stone-300 bg-white px-3.5 py-2 text-sm font-medium text-stone-600 shadow-sm hover:bg-stone-100" @click="resetCrop">
+                    ↺ 重置整图
+                  </button>
+                  <button type="button" class="rounded-md border border-stone-300 bg-white px-3.5 py-2 text-sm font-medium text-stone-600 shadow-sm hover:bg-stone-100" @click="onCropCancel">
+                    ✕ 取消裁剪
+                  </button>
+                </div>
+                <button type="button" class="rounded-md bg-brand-500 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-brand-600" @click="onCropConfirm">
+                  ✓ 完成裁剪
                 </button>
               </div>
+              <p class="mt-1.5 text-[11px] text-stone-400">拖动选区移动，拖动四角/四边缩放；回车或右键完成裁剪</p>
             </div>
           </div>
 
@@ -634,9 +632,8 @@ function printA4() {
 
           <div>
             <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-stone-500">
-              <label for="width-slider">图纸宽度（{{ alignBoard ? '板数' : '豆数' }}）</label>
+              <label for="width-slider">图纸宽度（豆数）</label>
               <span class="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-brand-600">
-                <template v-if="alignBoard && outputSize.w > 0">{{ Math.max(1, Math.round(outputSize.w / boardSize)) }} 板 · </template>
                 {{ outputSize.w }}×{{ outputSize.h }} 豆
               </span>
             </div>
@@ -644,38 +641,17 @@ function printA4() {
               id="width-slider"
               v-model.number="width"
               type="range"
-              :min="alignBoard ? boardSize : 16"
-              :max="alignBoard ? Math.max(boardSize, Math.floor(256 / boardSize) * boardSize) : 256"
-              :step="alignBoard ? boardSize : 1"
+              min="16"
+              max="256"
+              step="1"
               class="w-full accent-brand-500"
             />
             <div v-if="detailNote" class="mt-2 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-[11px] leading-4 text-brand-700">
               {{ detailNote }}
               <button class="ml-1 font-medium text-brand-600 hover:underline" @click="detailNote = ''">知道了</button>
             </div>
-            <div v-if="image && isComplex && suggestedWidth > outputSize.w" class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-4 text-amber-700">
-              这张图细节较多，当前宽度 {{ outputSize.w }} 豆可能偏糊，建议加大到 {{ suggestedWidth }} 豆宽（约 {{ Math.round(suggestedWidth / boardSize) }} 板）更精细。
-              <button class="ml-1 font-medium text-amber-700 underline" @click="applySuggestion">一键加大并生成</button>
-            </div>
-            <div class="mt-1 flex justify-between text-[10px] text-stone-300">
-              <span>{{ alignBoard ? '1 板' : '16' }}</span>
-              <span>{{ alignBoard ? Math.max(boardSize, Math.floor(256 / boardSize) * boardSize) + ' 豆' : '256' }}</span>
-            </div>
-            <p class="mt-1 text-[11px] text-stone-400">{{ alignBoard ? '拖动选择几块板宽（一格=一块板），板数越多细节越丰富。' : '自由调节图纸宽度（豆数）。' }}</p>
-          </div>
-
-          <div>
-            <label class="mb-1.5 block text-xs font-medium text-stone-500">底板尺寸（板数规划）</label>
-            <select v-model.number="boardSize" class="input !py-1.5">
-              <option :value="29">标准方板 29×29</option>
-              <option :value="50">大板 50×50</option>
-              <option :value="104">超大板 104×104</option>
-            </select>
-            <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
-              <input v-model="alignBoard" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
-              宽度对齐底板（整板倍数）
-            </label>
-            <p class="mt-1 text-[11px] text-stone-400">开启后图纸宽度自动吸附到整板倍数（如 29/58/87…），底板不浪费；生成后提示需要几块板、怎么排布。</p>
+            <div class="mt-1 flex justify-between text-[10px] text-stone-300"><span>16 豆</span><span>256 豆</span></div>
+            <p class="mt-1 text-[11px] text-stone-400">上传后按图片复杂度自动选择「标准版 / 大板 / 超大版」，也可拖动自由调整；豆数越多细节越丰富。</p>
           </div>
 
           <div>
@@ -731,8 +707,8 @@ function printA4() {
                 <option :value="0">关闭（全部颜色）</option>
                 <option :value="16">16 色</option>
                 <option :value="24">24 色（接近原图感）</option>
-                <option :value="32">32 色（推荐）</option>
-                <option :value="48">48 色</option>
+                <option :value="32">32 色</option>
+                <option :value="48">48 色（推荐）</option>
               </select>
               <p class="mt-1 text-[11px] text-stone-400">限制颜色数会自动合并相似色，去掉杂色，图案更干净好拼。</p>
               <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
@@ -874,11 +850,7 @@ function printA4() {
           <span v-if="brandMsg" class="text-brand-600">{{ brandMsg }}</span>
         </div>
 
-                <div v-if="isComplex && suggestedWidth > result.width" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
-          当前输出仅 {{ result.width }} 豆宽，细节偏少。加大到 {{ suggestedWidth }} 豆宽（约 {{ Math.round(suggestedWidth / boardSize) }} 板）能显著提升精细度，人物五官更清晰。
-          <button class="ml-1 font-medium text-amber-700 underline" @click="applySuggestion">加大并重新生成</button>
-        </div>
-
+        
         <div class="flex flex-wrap items-center gap-3 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">
           <div class="flex items-center gap-1 rounded-lg bg-white p-1 ring-1 ring-stone-200">
             <button

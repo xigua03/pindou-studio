@@ -392,6 +392,97 @@ function unsharp(data: Uint8ClampedArray, w: number, h: number, amount: number):
   }
 }
 
+/**
+ * 多步高质量降采样：从源图尺寸逐级减半缩到目标尺寸（近似 mipmap / Lanczos 效果），
+ * 比一次性 drawImage 保留更多边缘细节，避免糊边。
+ */
+function drawImageStepped(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  sx: number,
+  sy: number,
+  sw0: number,
+  sh0: number,
+  dw: number,
+  dh: number
+) {
+  // 目标尺寸接近源尺寸时单次绘制即可（避免多余的开销）
+  if (dw * 2 >= sw0 || dh * 2 >= sh0) {
+    ctx.drawImage(img, sx, sy, sw0, sh0, 0, 0, dw, dh)
+    return
+  }
+  let tmp = document.createElement('canvas')
+  let tw = Math.max(dw, Math.round(sw0 / 2))
+  let th = Math.max(dh, Math.round((tw * sh0) / sw0))
+  tmp.width = tw
+  tmp.height = th
+  let tctx = tmp.getContext('2d', { willReadFrequently: true })!
+  tctx.imageSmoothingEnabled = true
+  tctx.imageSmoothingQuality = 'high'
+  tctx.drawImage(img, sx, sy, sw0, sh0, 0, 0, tw, th)
+  // 逐级减半，直到接近目标尺寸
+  while (tw > dw * 2 || th > dh * 2) {
+    const nw = Math.max(dw, Math.round(tw / 2))
+    const nh = Math.max(dh, Math.round((nw * th) / tw))
+    const next = document.createElement('canvas')
+    next.width = nw
+    next.height = nh
+    const nctx = next.getContext('2d', { willReadFrequently: true })!
+    nctx.imageSmoothingEnabled = true
+    nctx.imageSmoothingQuality = 'high'
+    nctx.drawImage(tmp, 0, 0, tw, th, 0, 0, nw, nh)
+    tmp = next
+    tctx = nctx
+    tw = nw
+    th = nh
+  }
+  ctx.drawImage(tmp, 0, 0, tw, th, 0, 0, dw, dh)
+}
+
+/**
+ * 判断是否为「像素图/扁平色块图」（像素画、扁平卡通、Logo 等）。
+ * 用最近邻缩到 256 宽后统计：相邻像素完全相同比例（平坦度）+ 去重颜色数。
+ * 高平坦度 + 少颜色 → 像素图，使用最近邻采样保留锐利边缘（避免平滑缩放产生灰边）。
+ */
+export function isPixelArt(
+  img: HTMLImageElement,
+  src?: { x: number; y: number; w: number; h: number } | null
+): boolean {
+  const S = 256
+  const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
+  const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
+  const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
+  const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
+  const canvas = document.createElement('canvas')
+  const w = S
+  const h = Math.max(2, Math.round((S * sh0) / sw0))
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return false
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, w, h)
+  const d = ctx.getImageData(0, 0, w, h).data
+  const colors = new Set<number>()
+  let equal = 0
+  let total = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      const r = d[i]
+      const g = d[i + 1]
+      const b = d[i + 2]
+      colors.add(((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4))
+      if (x > 0) {
+        const j = i - 4
+        if (d[j] === r && d[j + 1] === g && d[j + 2] === b) equal++
+        total++
+      }
+    }
+  }
+  const flatness = total > 0 ? equal / total : 0
+  return flatness >= 0.45 && colors.size <= 300
+}
 export function imageToGridColors(
   img: HTMLImageElement,
   width: number,
@@ -410,13 +501,52 @@ export function imageToGridColors(
   const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
   const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
 
-  // Sampling resolution: must stay high enough that thin dark lines (whiskers,
-  // outlines, pupils) are at least ~1 sample thick after the initial resize.
-  // If we only draw at width*ss the lines get averaged away before the per-cell
-  // step below, so we never fall below min(natural, SAMPLE_CAP).
+  // 像素图/扁平色块图：用最近邻直接缩到网格尺寸，保留锐利边缘（平滑缩放会把色块边界混出灰边）
+  if (isPixelArt(img, src)) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, width, height)
+    const data = ctx.getImageData(0, 0, width, height).data
+    const out = new Uint8ClampedArray(width * height * 4)
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 4
+      let r = data[o]
+      let g = data[o + 1]
+      let b = data[o + 2]
+      if (brightness !== 0) {
+        const off = brightness * 2.55
+        r += off
+        g += off
+        b += off
+      }
+      if (saturate !== 1) {
+        const [sr, sg, sb] = boostSaturation(r, g, b, saturate)
+        r = sr
+        g = sg
+        b = sb
+      }
+      if (contrast !== 0) {
+        const f = 1 + contrast / 100
+        r = (r - 128) * f + 128
+        g = (g - 128) * f + 128
+        b = (b - 128) * f + 128
+      }
+      out[o] = clamp255(r)
+      out[o + 1] = clamp255(g)
+      out[o + 2] = clamp255(b)
+      out[o + 3] = 255
+    }
+    return out
+  }
+  // 采样分辨率：每个输出格子至少保留 supersample^2 个采样点，供「每格主色采样」统计；
+  // 大图限制上限，避免内存与耗时爆炸。
   const naturalMax = Math.max(sw0, sh0)
-  const SAMPLE_CAP = 1200
-  const sw = Math.max(1, Math.max(width * supersample, Math.min(naturalMax, SAMPLE_CAP)))
+  const SAMPLE_CAP = 1600
+  const minCellSamples = Math.max(4, supersample * supersample)
+  const sw = Math.max(1, Math.max(width * minCellSamples, Math.min(naturalMax, SAMPLE_CAP)))
   const sh = Math.max(1, Math.round((sw * sh0) / sw0))
 
   const canvas = document.createElement('canvas')
@@ -425,29 +555,32 @@ export function imageToGridColors(
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, sw, sh)
+  drawImageStepped(ctx, img, sxx, syy, sw0, sh0, sw, sh)
   const data = ctx.getImageData(0, 0, sw, sh).data
   if (sharpen > 0) unsharp(data, sw, sh, sharpen)
 
   const out = new Uint8ClampedArray(width * height * 4)
   const fx = sw / width
   const fy = sh / height
-  const DARK_LUM = 100 // a pixel this dark can be part of a thin dark line
+  const DARK_LUM = 100 // 该亮度以下的深色像素可能属于细线/描边
+  const BUCKET_SHIFT = 3 // 5bit/通道 粗分桶，用于统计每格主色
+
   for (let y = 0; y < height; y++) {
     const y0 = Math.floor(y * fy)
     const y1 = Math.max(y0 + 1, Math.floor((y + 1) * fy))
     for (let x = 0; x < width; x++) {
       const x0 = Math.floor(x * fx)
       const x1 = Math.max(x0 + 1, Math.floor((x + 1) * fx))
-      let r = 0
-      let g = 0
-      let b = 0
+      let sumR = 0
+      let sumG = 0
+      let sumB = 0
       let n = 0
       let minR = 255
       let minG = 255
       let minB = 255
       let minLum = 255
       let darkCount = 0
+      const hist = new Map<number, { r: number; g: number; b: number; n: number }>()
       for (let py = y0; py < y1; py++) {
         const rowBase = py * sw
         for (let px = x0; px < x1; px++) {
@@ -456,9 +589,9 @@ export function imageToGridColors(
           const rr = data[i] * a + 255 * (1 - a)
           const gg = data[i + 1] * a + 255 * (1 - a)
           const bb = data[i + 2] * a + 255 * (1 - a)
-          r += rr
-          g += gg
-          b += bb
+          sumR += rr
+          sumG += gg
+          sumB += bb
           n++
           const lum = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb
           if (lum < minLum) {
@@ -468,20 +601,44 @@ export function imageToGridColors(
             minB = bb
           }
           if (lum < DARK_LUM) darkCount++
+          const key = ((rr >> BUCKET_SHIFT) << 10) | ((gg >> BUCKET_SHIFT) << 5) | (bb >> BUCKET_SHIFT)
+          const cur = hist.get(key)
+          if (cur) {
+            cur.r += rr
+            cur.g += gg
+            cur.b += bb
+            cur.n++
+          } else {
+            hist.set(key, { r: rr, g: gg, b: bb, n: 1 })
+          }
         }
       }
-      r /= n
-      g /= n
-      b /= n
-      // Preserve thin dark details: when a cell contains a clearly darker
-      // region than its average (a thin line crossing the cell), pull the cell
-      // toward the darkest pixel so whiskers / outlines survive downscaling.
+      // 每格主色采样：取格内出现频率最高的颜色（而不是直接平均），
+      // 避免色块边界混合出灰边/糊色；顶部主色占比不足时回退到平均值（保留照片渐变）。
+      let best: { r: number; g: number; b: number; n: number } | null = null
+      for (const v of hist.values()) {
+        if (!best || v.n > best.n) best = v
+      }
+      let r: number
+      let g: number
+      let b: number
+      if (best && n > 0 && best.n / n >= 0.25) {
+        r = best.r / best.n
+        g = best.g / best.n
+        b = best.b / best.n
+      } else {
+        r = sumR / n
+        g = sumG / n
+        b = sumB / n
+      }
+      // 保留细深色线（胡须/描边）：当格内存在明显更深的少数像素时，向最深色拉近
       if (protectDark > 0 && darkCount > 0) {
         const meanLum = 0.2126 * r + 0.7152 * g + 0.0722 * b
         const gap = meanLum - minLum
         if (gap > 40 && minLum < DARK_LUM) {
-          const coverage = Math.min(1, darkCount / n / 0.12)
-          const strength = protectDark * coverage * Math.min(1, gap / 90)
+          const coverage = Math.min(1, darkCount / n)
+          const lineLikeness = coverage >= 0.04 && coverage <= 0.6 ? Math.min(1, (coverage + 0.15) / 0.4) : 0
+          const strength = protectDark * lineLikeness * Math.min(1, gap / 90)
           if (strength > 0.02) {
             r = r * (1 - strength) + minR * strength
             g = g * (1 - strength) + minG * strength
@@ -519,11 +676,97 @@ export function imageToGridColors(
   return out
 }
 
-
 /**
  * Auto-detect background color by sampling the four corners of a downscaled copy
  * and taking the median of the corner averages.
  */
+/**
+ * 估算主体内容占整图宽度的比例（0.3~1）：先把图缩到 96 宽，取四角中位色为背景色，
+ * 从边缘泛洪标记连通背景后，计算剩余「非背景」像素的横向包围盒占比。
+ * 用于自动选档时补偿纯色背景/白边：让去背景+自动裁剪后的主体实际宽度达到目标档位。
+ */
+export function estimateContentRatio(img: HTMLImageElement): number {
+  const S = 96
+  const canvas = document.createElement('canvas')
+  const w = S
+  const h = Math.max(2, Math.round((S * img.naturalHeight) / img.naturalWidth))
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return 1
+  ctx.drawImage(img, 0, 0, w, h)
+  const data = ctx.getImageData(0, 0, w, h).data
+  const corners: [number, number, number][] = []
+  const cornerPts = [
+    [0, 0],
+    [w - 1, 0],
+    [0, h - 1],
+    [w - 1, h - 1]
+  ]
+  for (const [x, y] of cornerPts) {
+    const o = (y * w + x) * 4
+    corners.push([data[o], data[o + 1], data[o + 2]])
+  }
+  corners.sort((a, b) => a[0] + a[1] + a[2] - (b[0] + b[1] + b[2]))
+  const bg = corners[Math.floor(corners.length / 2)] as [number, number, number]
+  const bgLab = rgbToLab(bg[0], bg[1], bg[2])
+  const TH = 18
+  const isBg = (i: number): boolean => {
+    const o = i * 4
+    return ciede2000(rgbToLab(data[o], data[o + 1], data[o + 2]), bgLab) < TH
+  }
+  const visited = new Uint8Array(w * h)
+  const stack: number[] = []
+  const seed = (i: number) => {
+    if (!visited[i] && isBg(i)) {
+      visited[i] = 1
+      stack.push(i)
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    seed(x)
+    seed((h - 1) * w + x)
+  }
+  for (let y = 0; y < h; y++) {
+    seed(y * w)
+    seed(y * w + w - 1)
+  }
+  while (stack.length > 0) {
+    const i = stack.pop()!
+    const x = i % w
+    const y = (i / w) | 0
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1]
+    ] as const) {
+      const nx = x + dx
+      const ny = y + dy
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      const j = ny * w + nx
+      if (!visited[j] && isBg(j)) {
+        visited[j] = 1
+        stack.push(j)
+      }
+    }
+  }
+  let minX = w
+  let maxX = -1
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (!visited[i] && !isBg(i)) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+      }
+    }
+  }
+  if (maxX < minX) return 1
+  const ratio = (maxX - minX + 1) / w
+  return Math.max(0.3, Math.min(1, ratio))
+}
+
 export function detectBackgroundColor(
   img: HTMLImageElement,
   src?: { x: number; y: number; w: number; h: number } | null
@@ -674,8 +917,6 @@ export function emptyOuterBackground(rows: string[][], mask: boolean[][]): strin
   }
   return rows
 }
-
-/** ???????????????? */
 
 /** 统计每种颜色（色号）的使用颗数 */
 export function computeUsedCounts(rows: string[][]): Map<string, number> {
@@ -988,11 +1229,6 @@ export function applyOutline(rows: string[][], palette: BeadPalette): string[][]
  * 去杂点：把 8 连通的孤立小色块（噪声）替换成周围出现最多的颜色。
  * 卡通胡须/轮廓是较长的连通区域，不会被误删。
  */
-/**
- * ????????????????? < minCluster ?????
- * ????????????????????????????????????????
- * ??????????????? 1x1 ???????????? 2 ????????????
- */
 export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
   const h = rows.length
   if (h === 0) return rows
@@ -1040,7 +1276,7 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
     return false
   }
 
-  // ????????????????????????????????? 5 ??
+  // 最多迭代 5 轮，每轮重新检测小色块
   for (let pass = 0; pass < 5; pass++) {
     const visited = new Uint8Array(w * h)
     let changed = false
@@ -1078,10 +1314,10 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
             best = c
           }
           if (!best) {
-            // ????????????????????????
+            // 周围没有其他颜色可替换时直接留空
             out[cy][cx] = '.'
           } else if (hasSameNeighbor(cx, cy, best)) {
-            // ??????????????????????? 1x1 ??
+            // 替换后若与同色邻居相连则保留，否则留空（避免 1x1 孤立点）
             out[cy][cx] = best
           } else {
             out[cy][cx] = '.'
