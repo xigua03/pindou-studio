@@ -14,8 +14,8 @@ const routes = [
   { path: '/share/:token', name: 'share', component: () => import('../views/SharedView.vue'), meta: { title: '共享图纸', feature: 'share' } },
   { path: '/login', name: 'login', component: () => import('../views/AuthView.vue'), meta: { title: '登录 / 注册', guestOnly: true } },
   { path: '/reset-password', name: 'reset-password', component: () => import('../views/ResetPasswordView.vue'), meta: { title: '重置密码', guestOnly: true } },
-  { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心', requiresAuth: true } },
-  { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue'), meta: { title: '后台管理', requiresAuth: true, requiresAdmin: true } },
+  { path: '/profile/:tab?', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心', requiresAuth: true } },
+  { path: '/admin/:tab?', name: 'admin', component: () => import('../views/AdminView.vue'), meta: { title: '后台管理', requiresAuth: true, requiresAdmin: true } },
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 

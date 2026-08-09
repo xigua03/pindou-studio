@@ -1,14 +1,31 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuth, type AiUsage, type User } from '../composables/useAuth'
 import { api } from '../utils/api'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuth()
 const { isAdmin } = auth
 
-const tab = ref<'profile' | 'password' | 'sync' | 'shares'>('profile')
+const PROFILE_TABS = ['profile', 'password', 'sync', 'shares'] as const
+const tab = ref<(typeof PROFILE_TABS)[number]>('profile')
+
+function validProfileTab(v: unknown): typeof tab.value {
+  return (PROFILE_TABS as readonly string[]).includes(String(v)) ? (v as typeof tab.value) : 'profile'
+}
+
+function switchTab(t: typeof tab.value) {
+  router.push(t === 'profile' ? '/profile' : '/profile/' + t)
+}
+
+watch(
+  () => route.params.tab,
+  (v) => {
+    tab.value = validProfileTab(v)
+  }
+)
 
 // ---------- 资料 ----------
 const nickname = ref('')
@@ -64,6 +81,7 @@ function initProfile() {
 }
 
 onMounted(async () => {
+  tab.value = validProfileTab(route.params.tab)
   await auth.fetchMe()
   initProfile()
   try {
@@ -310,7 +328,7 @@ function logout() {
         :key="t.id"
         class="rounded-t-lg px-4 py-2.5 text-sm font-medium transition"
         :class="tab === t.id ? 'border-b-2 border-brand-500 text-brand-600' : 'text-stone-400 hover:text-stone-600'"
-        @click="tab = t.id"
+        @click="switchTab(t.id)"
       >
         {{ t.label }}
       </button>

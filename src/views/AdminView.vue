@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { api } from '../utils/api'
 import { PALETTES, getPalette } from '../data/palettes'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuth()
 
-const tab = ref<'dashboard' | 'users' | 'patterns' | 'collect' | 'palettes' | 'shares' | 'ai' | 'feedback' | 'settings' | 'logs' | 'update'>('dashboard')
+const ADMIN_TABS = ['dashboard', 'users', 'patterns', 'collect', 'palettes', 'shares', 'ai', 'feedback', 'settings', 'logs', 'update'] as const
+const tab = ref<(typeof ADMIN_TABS)[number]>('dashboard')
+
+function validAdminTab(v: unknown): typeof tab.value {
+  return (ADMIN_TABS as readonly string[]).includes(String(v)) ? (v as typeof tab.value) : 'dashboard'
+}
 const loading = ref(false)
 const err = ref('')
 
@@ -325,8 +331,7 @@ async function run(fn: () => Promise<void>) {
   }
 }
 
-function switchTab(t: typeof tab.value) {
-  tab.value = t
+function loadForTab(t: typeof tab.value) {
   err.value = ''
   if (t === 'dashboard') loadStats()
   else if (t === 'users') loadUsers()
@@ -340,6 +345,26 @@ function switchTab(t: typeof tab.value) {
   else if (t === 'logs') loadLogs()
   else if (t === 'update') loadUpdate()
 }
+
+function switchTab(t: typeof tab.value) {
+  // 点击当前已选中的菜单时仍重新加载（相当于刷新）
+  if (tab.value === t && validAdminTab(route.params.tab) === t) {
+    loadForTab(t)
+    return
+  }
+  router.push('/admin/' + t)
+}
+
+watch(
+  () => route.params.tab,
+  (v) => {
+    const t = validAdminTab(v)
+    if (t !== tab.value) {
+      tab.value = t
+      loadForTab(t)
+    }
+  }
+)
 
 async function loadStats() {
   await run(async () => {
@@ -1095,7 +1120,8 @@ onMounted(async () => {
     router.replace('/')
     return
   }
-  loadStats()
+  tab.value = validAdminTab(route.params.tab)
+  loadForTab(tab.value)
 })
 
 const tabs = [
@@ -1191,6 +1217,7 @@ interface UpdateStatus {
   stale: boolean
   status: { running?: boolean; step?: string; stepStartedAt?: number; startedAt?: number; ok?: boolean; error?: string } | null
   logTail: string
+  logVisible: boolean
 }
 const upd = ref<UpdateStatus | null>(null)
 const updMsg = ref('')
@@ -2087,7 +2114,10 @@ async function resetUpdateState() {
       <div class="card space-y-4 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-base font-semibold text-stone-800">⬇ 版本更新</h2>
-          <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="loadUpdate">刷新状态</button>
+          <div class="flex items-center gap-2">
+            <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="loadUpdate">刷新状态</button>
+            <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="resetUpdateState">重置更新状态</button>
+          </div>
         </div>
         <div class="grid gap-3 sm:grid-cols-2">
           <div class="rounded-xl bg-stone-50 px-4 py-3">
@@ -2111,11 +2141,10 @@ async function resetUpdateState() {
         </div>
         <div v-if="upd?.needsRestart || upd?.stale" class="flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
           <span>
-            <template v-if="upd.needsRestart && !upd.stale">⏳ 构建已完成，正在重启服务…（如页面已正常访问但状态未更新，可点击重置）</template>
+            <template v-if="upd.needsRestart && !upd.stale">⏳ 构建已完成，正在重启服务…（如页面已正常访问但状态未更新，可点击右上角「重置更新状态」）</template>
             <template v-else-if="upd.stale && upd.needsRestart">⚠️ 上次更新疑似在重启服务时中断，可重置状态后重新检查。</template>
             <template v-else>⚠️ 上次更新疑似中断（已运行超过 30 分钟无进展），可重置状态后重新检查。</template>
           </span>
-          <button class="rounded-md bg-amber-500 px-2.5 py-1 font-medium text-white hover:bg-amber-600" :disabled="loading" @click="resetUpdateState">重置更新状态</button>
         </div>
         <p v-if="updMsg" class="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{{ updMsg }}</p>
         <p v-if="upd?.localCommit && !upd?.latestTag" class="text-[11px] text-stone-400">本地提交 {{ upd.localCommit }} · 远程 {{ upd.remoteCommit || '未知' }}（{{ upd.branch || 'main' }} 分支）</p>
@@ -2130,7 +2159,7 @@ async function resetUpdateState() {
           <button class="btn btn-primary" :disabled="upd?.running || upd?.needsRestart || !upd?.hasUpdate" @click="runUpdateNow">一键更新到最新版</button>
           <span class="text-xs text-stone-400">更新将执行：拉取代码 → 安装依赖 → 构建前端 → 重启服务（pm2）</span>
         </div>
-        <div v-if="upd?.logTail" class="rounded-xl border border-stone-100 p-4">
+        <div v-if="upd?.logTail && upd?.logVisible !== false" class="rounded-xl border border-stone-100 p-4">
           <h3 class="mb-2 text-sm font-semibold text-stone-700">🪵 执行日志</h3>
           <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-stone-50 p-3 font-mono text-xs leading-5 text-stone-600">{{ upd.logTail }}</pre>
         </div>

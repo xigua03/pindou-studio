@@ -29,7 +29,7 @@ function onDocClick(e: MouseEvent) {
 const theme = ref<'light' | 'dark'>(
   typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
 )
-const appVersion = '1.2.4'
+const appVersion = '1.2.5'
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.setAttribute('data-theme', theme.value)
@@ -83,7 +83,7 @@ watch(
 function logout() {
   auth.logout()
   userMenuOpen.value = false
-  if (route.path === '/profile' || route.path === '/admin') {
+  if (route.path.startsWith('/profile') || route.path.startsWith('/admin')) {
     router.replace('/')
   }
 }
@@ -154,7 +154,7 @@ function logout() {
               </div>
               <div class="my-1 border-t border-stone-100"></div>
               <router-link to="/profile" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-stone-700 hover:bg-brand-50 hover:text-brand-600">
-                <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg" :class="route.path === '/profile' ? 'bg-brand-50 text-brand-600' : 'bg-stone-100 text-stone-500'">
+                <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg" :class="route.path.startsWith('/profile') ? 'bg-brand-50 text-brand-600' : 'bg-stone-100 text-stone-500'">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                 </span>
                 个人中心
