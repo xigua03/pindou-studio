@@ -48,8 +48,8 @@ export function drawCoordFrame(
   ctx.save()
   // minor reference lines every 5 cells (faint red, like perlerbeads)
   if (minorEvery > 1) {
-    ctx.strokeStyle = 'rgba(224,36,36,0.5)'
-    ctx.lineWidth = 1.3
+    ctx.strokeStyle = 'rgba(224,36,36,0.55)'
+    ctx.lineWidth = 1.2
     ctx.beginPath()
     for (let cx = minorEvery; cx < pattern.width; cx += minorEvery) {
       if (cx <= rx || cx >= rx + rw) continue
@@ -65,10 +65,12 @@ export function drawCoordFrame(
     }
     ctx.stroke()
   }
-  // major board-boundary lines (thick red)
+  // 板边界线：用蓝色虚线区分，避免与 5x5 网格线混淆（明确表示板边缘而非网格线）
   if (boardSize > 1) {
-    ctx.strokeStyle = 'rgba(224,36,36,0.8)'
-    ctx.lineWidth = Math.max(1.5, cellSize * 0.1)
+    ctx.save()
+    ctx.strokeStyle = 'rgba(37,99,235,0.9)'
+    ctx.lineWidth = Math.max(2, cellSize * 0.14)
+    ctx.setLineDash([6, 4])
     ctx.beginPath()
     for (let bx = boardSize; bx < pattern.width; bx += boardSize) {
       if (bx <= rx || bx >= rx + rw) continue
@@ -83,6 +85,7 @@ export function drawCoordFrame(
       ctx.lineTo(ox + rw * cellSize, py)
     }
     ctx.stroke()
+    ctx.restore()
   }
   // row / column coordinate numbers
   if (strip > 0) {
@@ -133,24 +136,28 @@ export function patternToCanvas(pattern: Pattern, palette: BeadPalette, opts: Re
     const row = pattern.rows[y] ?? []
     for (let x = r.x; x < r.x + r.w; x++) {
       const code = row[x] ?? ''
-      if (!code || code === '.') continue
-      const color = byCode.get(code)
       const px = padding + leftW + (x - r.x) * cellSize
       const py = padding + topH + (y - r.y) * cellSize
-      if (color) {
-        ctx.fillStyle = color.hex
-        ctx.fillRect(px, py, cellSize, cellSize)
+      const isDot = !code || code === '.'
+      if (!isDot) {
+        const color = byCode.get(code)
+        if (color) {
+          ctx.fillStyle = color.hex
+          ctx.fillRect(px, py, cellSize, cellSize)
+        }
+        // 色号在小格子（>=5px）也显示，下载图纸/色号统计不丢色号
+        if (showCodes && color && cellSize >= 5) {
+          const fontSize = Math.max(5, cellSize * 0.38 * codeFontScale)
+          ctx.fillStyle = contrastText(color.hex)
+          ctx.font = `600 ${fontSize}px system-ui, "Microsoft YaHei", sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          // 色号最多显示前 2 个字符
+          const label = code.length > 2 ? code.slice(0, 2) : code
+          ctx.fillText(label, px + cellSize / 2, py + cellSize / 2 + 0.5)
+        }
       }
-      if (showCodes && color && cellSize >= 10) {
-        const fontSize = Math.max(7, cellSize * 0.38 * codeFontScale)
-        ctx.fillStyle = contrastText(color.hex)
-        ctx.font = `600 ${fontSize}px system-ui, "Microsoft YaHei", sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        // 色号最多显示前 2 个字符
-        const label = code.length > 2 ? code.slice(0, 2) : code
-        ctx.fillText(label, px + cellSize / 2, py + cellSize / 2 + 0.5)
-      }
+      // 空格子也画网格线，方便数出要空几格（外围方格不丢失）
       if (showGrid) {
         ctx.strokeStyle = 'rgba(0,0,0,0.08)'
         ctx.lineWidth = 0.5
@@ -275,10 +282,10 @@ export function renderPatternSheet(pattern: Pattern, palette: BeadPalette, opts:
   const usage = computeColorUsage(pattern)
   const total = usage.reduce((s, u) => s + u.count, 0)
 
-  const cell = opts.cellSize ?? Math.max(6, Math.min(22, Math.floor(840 / Math.max(pattern.width, 1))))
+  const cell = opts.cellSize ?? Math.max(10, Math.min(22, Math.floor(840 / Math.max(pattern.width, 1))))
   const gridCanvas = patternToCanvas(pattern, palette, {
     cellSize: cell,
-    showCodes: cell >= 10,
+    showCodes: true,
     showGrid: true,
     background: '#ffffff',
     padding: 6,

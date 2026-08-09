@@ -152,7 +152,7 @@ export function loadImageFromFile(file: File): Promise<HTMLImageElement> {
     img.onload = () => resolve(img)
     img.onerror = () => {
       URL.revokeObjectURL(url)
-      reject(new Error('??????'))
+      reject(new Error('图片加载失败，请更换图片重试'))
     }
     img.src = url
   })
@@ -196,6 +196,53 @@ export function buildPatternFromRows(
   }
 }
 
+/** 大图提速：格数较多时把量化任务交给 Web Worker，避免 CIEDE2000 阻塞主线程 */
+const WORKER_MIN_CELLS = 12000
+function quantizeImageInWorker(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  palette: BeadPalette,
+  mode: GenMode,
+  onProgress?: (p: number) => void,
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
+): Promise<{ rows: string[][]; used: Set<string> }> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./quantize.worker.ts', import.meta.url), { type: 'module' })
+    const timer = setTimeout(() => {
+      worker.terminate()
+      reject(new Error('quantize worker timeout'))
+    }, 120000)
+    worker.onmessage = (e: MessageEvent<{ progress?: number; rows?: string[][]; used?: string[] }>) => {
+      const d = e.data
+      if (typeof d.progress === 'number') {
+        onProgress?.(d.progress)
+        return
+      }
+      if (d.rows && d.used) {
+        clearTimeout(timer)
+        worker.terminate()
+        resolve({ rows: d.rows, used: new Set(d.used) })
+      }
+    }
+    worker.onerror = (e) => {
+      clearTimeout(timer)
+      worker.terminate()
+      reject(e?.message ? new Error(e.message) : new Error('quantize worker error'))
+    }
+    worker.postMessage({
+      pixels,
+      width,
+      height,
+      mode: mode === 'floyd' ? 'floyd' : 'nearest',
+      colors: palette.colors.map((c) => ({ code: c.code, rgb: c.rgb })),
+      excludeCodes: exclude ? Array.from(exclude) : [],
+      background: background ? { rgb: background.rgb, threshold: background.threshold } : null
+    })
+  })
+}
+
 /** Async chunked quantization: yield to the event loop between batches (for progress UI) */
 export async function quantizeImageAsync(
   pixels: Uint8ClampedArray,
@@ -207,6 +254,14 @@ export async function quantizeImageAsync(
   background?: BackgroundConfig | null,
   exclude?: Set<string> | null
 ): Promise<{ rows: string[][]; used: Set<string> }> {
+  // 大图提速：格数足够大时优先用 Web Worker，Worker 不可用/失败时回退主线程分块量化
+  if (width * height >= WORKER_MIN_CELLS && typeof Worker !== 'undefined') {
+    try {
+      return await quantizeImageInWorker(pixels, width, height, palette, mode, onProgress, background, exclude)
+    } catch {
+      /* 回退 */
+    }
+  }
   if (mode === 'floyd') return quantizeImageFloydAsync(pixels, width, height, palette, onProgress, background, exclude)
   const table = buildTableExcluding(palette, exclude)
   const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
@@ -933,50 +988,75 @@ export function applyOutline(rows: string[][], palette: BeadPalette): string[][]
  * 去杂点：把 8 连通的孤立小色块（噪声）替换成周围出现最多的颜色。
  * 卡通胡须/轮廓是较长的连通区域，不会被误删。
  */
+/**
+ * ????????????????? < minCluster ?????
+ * ????????????????????????????????????????
+ * ??????????????? 1x1 ???????????? 2 ????????????
+ */
 export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
   const h = rows.length
   if (h === 0) return rows
   const w = rows[0].length
   if (w === 0) return rows
-  const out = rows.map((r) => [...r])
-  const visited = new Uint8Array(w * h)
-  const stack: number[] = []
-  const cluster: number[] = []
+  let out = rows.map((r) => [...r])
   const inside = (nx: number, ny: number) => nx >= 0 && ny >= 0 && nx < w && ny < h
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x
-      if (visited[idx]) continue
-      const code = rows[y][x]
-      if (!code || code === '.') {
-        visited[idx] = 1
-        continue
-      }
-      visited[idx] = 1
-      stack.length = 0
-      cluster.length = 0
-      stack.push(idx)
-      while (stack.length > 0) {
-        const i = stack.pop()!
-        cluster.push(i)
-        const cx = i % w
-        const cy = (i / w) | 0
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue
-            const nx = cx + dx
-            const ny = cy + dy
-            if (!inside(nx, ny)) continue
-            const j = ny * w + nx
-            if (!visited[j] && rows[ny][nx] === code) {
-              visited[j] = 1
-              stack.push(j)
-            }
+
+  const collectCluster = (grid: string[][], startIdx: number, code: string, visited: Uint8Array): number[] => {
+    const stack = [startIdx]
+    const cells: number[] = []
+    visited[startIdx] = 1
+    while (stack.length > 0) {
+      const i = stack.pop()!
+      cells.push(i)
+      const cx = i % w
+      const cy = (i / w) | 0
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const nx = cx + dx
+          const ny = cy + dy
+          if (!inside(nx, ny)) continue
+          const j = ny * w + nx
+          if (!visited[j] && grid[ny][nx] === code) {
+            visited[j] = 1
+            stack.push(j)
           }
         }
       }
-      if (cluster.length < minCluster) {
-        for (const i of cluster) {
+    }
+    return cells
+  }
+
+  const hasSameNeighbor = (cx: number, cy: number, code: string): boolean => {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const nx = cx + dx
+        const ny = cy + dy
+        if (!inside(nx, ny)) continue
+        if (out[ny][nx] === code) return true
+      }
+    }
+    return false
+  }
+
+  // ????????????????????????????????? 5 ??
+  for (let pass = 0; pass < 5; pass++) {
+    const visited = new Uint8Array(w * h)
+    let changed = false
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x
+        if (visited[idx]) continue
+        const code = out[y][x]
+        if (!code || code === '.') {
+          visited[idx] = 1
+          continue
+        }
+        const cells = collectCluster(out, idx, code, visited)
+        if (cells.length >= minCluster) continue
+        changed = true
+        for (const i of cells) {
           const cx = i % w
           const cy = (i / w) | 0
           const votes = new Map<string, number>()
@@ -986,7 +1066,7 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
               const nx = cx + dx
               const ny = cy + dy
               if (!inside(nx, ny)) continue
-              const nc = rows[ny][nx]
+              const nc = out[ny][nx]
               if (!nc || nc === '.' || nc === code) continue
               votes.set(nc, (votes.get(nc) || 0) + 1)
             }
@@ -997,10 +1077,19 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
             bestN = n
             best = c
           }
-          if (best) out[cy][cx] = best
+          if (!best) {
+            // ????????????????????????
+            out[cy][cx] = '.'
+          } else if (hasSameNeighbor(cx, cy, best)) {
+            // ??????????????????????? 1x1 ??
+            out[cy][cx] = best
+          } else {
+            out[cy][cx] = '.'
+          }
         }
       }
     }
+    if (!changed) break
   }
   return out
 }

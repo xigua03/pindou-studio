@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { PALETTES, getPalette, paletteGroups, customPalettes, addCustomPalette, updateCustomPaletteColors, deleteCustomPalette } from '../data/palettes'
+import { computed, onMounted, ref } from 'vue'
+import { PALETTES, getPalette, paletteGroups, customPalettes, addCustomPalette, updateCustomPaletteColors, deleteCustomPalette, loadServerPalettes } from '../data/palettes'
 import type { BeadColor } from '../types'
 import { colorDistance, hexToRgb, rgbToHex } from '../utils/color'
+
+onMounted(() => {
+  loadServerPalettes()
+})
 
 const paletteId = ref('mard-221-github')
 const pickColor = ref('#FF7043')

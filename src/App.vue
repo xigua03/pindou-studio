@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useConfig } from './composables/useConfig'
 import { useStore } from './composables/useStore'
 import { useAuth } from './composables/useAuth'
+import { loadServerPalettes } from './data/palettes'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,6 +14,20 @@ const config = useConfig()
 const store = useStore()
 const menuOpen = ref(false)
 const userMenuOpen = ref(false)
+// 深色模式：localStorage 持久化，初始值已在 index.html 中提前设置到 <html data-theme>
+const theme = ref<'light' | 'dark'>(
+  typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+)
+function toggleTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  document.documentElement.setAttribute('data-theme', theme.value)
+  try {
+    localStorage.setItem('pd_theme', theme.value)
+  } catch {
+    /* ignore */
+  }
+}
+const isAdminRoute = computed(() => route.path.startsWith('/admin'))
 watch(
   () => route.fullPath,
   () => {
@@ -24,6 +39,7 @@ onMounted(() => {
   auth.fetchMe()
   config.loadConfig()
   store.loadServerPatterns()
+  loadServerPalettes()
 })
 
 const navs = [
@@ -81,6 +97,15 @@ function logout() {
             {{ n.label }}
           </router-link>
         </nav>
+
+        <!-- 深色模式切换 -->
+        <button
+          class="btn btn-ghost !px-2.5 !py-2 text-lg"
+          :title="theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
+          @click="toggleTheme"
+        >
+          {{ theme === 'dark' ? '☀️' : '🌙' }}
+        </button>
 
         <!-- 用户区 -->
         <div class="relative shrink-0">
@@ -155,7 +180,7 @@ function logout() {
     <div v-if="config.state.maintenance" class="no-print bg-amber-500 px-4 py-2 text-center text-sm font-medium text-white">
       ⚠️ 站点维护中，部分功能可能暂时不可用
     </div>
-    <div v-if="config.state.siteNotice" class="no-print border-b border-brand-100 bg-brand-50 px-4 py-2 text-center text-sm text-brand-700">
+    <div v-if="config.state.siteNotice && !isAdminRoute" class="no-print border-b border-brand-100 bg-brand-50 px-4 py-2 text-center text-sm text-brand-700">
       {{ config.state.siteNotice }}
     </div>
 

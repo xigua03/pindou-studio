@@ -69,11 +69,22 @@ export interface PatternGroup {
   patternIds: string[]
 }
 
+/** 版本历史：每次保存前自动留下上一份快照 */
+export interface PatternVersion {
+  ts: number
+  name: string
+  paletteId: string
+  width: number
+  height: number
+  rows: string[][]
+}
+
 interface PersistedState {
   favorites: string[]
   savedPatterns: Pattern[]
   inventory: Inventory
   groups: PatternGroup[]
+  patternVersions: Record<string, PatternVersion[]>
 }
 
 const initialFavorites = loadJSON<string[]>('favorites', [])
@@ -84,7 +95,8 @@ const state = reactive<PersistedState>({
   favorites: dedupedFavorites,
   savedPatterns: dedupedPatterns,
   inventory: loadJSON<Inventory>('inventory', {}),
-  groups: loadJSON<PatternGroup[]>('groups', [])
+  groups: loadJSON<PatternGroup[]>('groups', []),
+  patternVersions: loadJSON<Record<string, PatternVersion[]>>('pattern_versions', {})
 })
 
 /** ?????????????????????? null??????? */
@@ -116,6 +128,11 @@ watch(
   (v) => saveJSON('groups', v),
   { deep: true }
 )
+watch(
+  () => state.patternVersions,
+  (v) => saveJSON('pattern_versions', v),
+  { deep: true }
+)
 
 export function useStore() {
   const allPatterns = (): Pattern[] => [
@@ -140,7 +157,7 @@ export function useStore() {
         .filter((p) => p && p.id && Array.isArray(p.rows))
         .map((p) => ({
           id: String(p.id),
-          name: String(p.name || '???'),
+          name: String(p.name || '未命名图纸'),
           description: String(p.description || ''),
           tags: Array.isArray(p.tags) ? (p.tags as string[]) : [],
           paletteId: String(p.paletteId || 'mard-221-github'),
@@ -154,6 +171,39 @@ export function useStore() {
       serverPatterns.value = list
     } catch {
       /* ???????????? */
+    }
+  }
+
+  /** 单图纸加载：本地没有时从服务端拉取并合并进 gallery 状态，避免“图纸不存在” */
+  const fetchPattern = async (id: string): Promise<Pattern | undefined> => {
+    try {
+      const res = await fetch(`/api/patterns/${encodeURIComponent(id)}`)
+      if (!res.ok) return undefined
+      const p = (await res.json()) as Record<string, unknown>
+      if (!p || !p.id || !Array.isArray(p.rows)) return undefined
+      const pattern: Pattern = {
+        id: String(p.id),
+        name: String(p.name || '未命名'),
+        description: String(p.description || ''),
+        tags: Array.isArray(p.tags) ? (p.tags as string[]) : [],
+        paletteId: String(p.paletteId || 'mard-221-github'),
+        width: Number(p.width) || 0,
+        height: Number(p.height) || 0,
+        rows: p.rows as string[][],
+        source: 'builtin' as const,
+        sourceLabel: p.sourceLabel ? String(p.sourceLabel) : undefined,
+        createdAt: Number(p.createdAt) || 0
+      }
+      if (serverPatterns.value) {
+        if (!serverPatterns.value.some((x) => x.id === pattern.id)) {
+          serverPatterns.value = [...serverPatterns.value, pattern]
+        }
+      } else {
+        serverPatterns.value = [pattern]
+      }
+      return pattern
+    } catch {
+      return undefined
     }
   }
 
@@ -190,9 +240,62 @@ export function useStore() {
       return dup.id
     }
     const i = state.savedPatterns.findIndex((p) => p.id === pattern.id)
-    if (i >= 0) state.savedPatterns[i] = pattern
-    else state.savedPatterns.unshift(pattern)
+    if (i >= 0) {
+      const oldP = state.savedPatterns[i]
+      // 内容变化时把旧内容归档为版本（保留最新8个）
+      if (rowsKey(oldP.rows) !== rowsKey(pattern.rows)) addVersionLocked(oldP)
+      state.savedPatterns[i] = pattern
+    } else {
+      state.savedPatterns.unshift(pattern)
+    }
     return pattern.id
+  }
+
+  /** 通知 Vue 观测到版本数组替换（避免深度观察不触发持久化） */
+  function addVersionLocked(p: Pattern): void {
+    const list = state.patternVersions[p.id] ? [...state.patternVersions[p.id]] : []
+    list.unshift({ ts: Date.now(), name: p.name, paletteId: p.paletteId, width: p.width, height: p.height, rows: p.rows.map((r) => [...r]) })
+    if (list.length > 8) list.length = 8
+    state.patternVersions = { ...state.patternVersions, [p.id]: list }
+  }
+
+  const addPatternVersion = (p: Pattern): void => {
+    if (!p || !p.id) return
+    addVersionLocked(p)
+  }
+
+  const getPatternVersions = (id: string): PatternVersion[] => state.patternVersions[id] || []
+
+  /** 回滚到某个版本；如图纸已被删除，重新创建 */
+  const restorePatternVersion = (id: string, ts: number): boolean => {
+    const list = state.patternVersions[id] || []
+    const v = list.find((x) => x.ts === ts)
+    if (!v) return false
+    const idx = state.savedPatterns.findIndex((p) => p.id === id)
+    const restored: Pattern = {
+      id,
+      name: v.name,
+      tags: idx >= 0 ? state.savedPatterns[idx].tags : [],
+      description: idx >= 0 ? state.savedPatterns[idx].description : '',
+      paletteId: v.paletteId,
+      width: v.width,
+      height: v.height,
+      rows: v.rows.map((r) => [...r]),
+      source: 'edited',
+      createdAt: idx >= 0 ? state.savedPatterns[idx].createdAt : Date.now()
+    }
+    if (idx >= 0) state.savedPatterns[idx] = restored
+    else state.savedPatterns.unshift(restored)
+    return true
+  }
+
+  const deletePatternVersion = (id: string, ts: number): void => {
+    const list = state.patternVersions[id] || []
+    const next = list.filter((x) => x.ts !== ts)
+    const copy = { ...state.patternVersions }
+    if (next.length) copy[id] = next
+    else delete copy[id]
+    state.patternVersions = copy
   }
 
   const deletePattern = (id: string): void => {
@@ -278,6 +381,7 @@ export function useStore() {
     getPattern,
     galleryPatterns,
     loadServerPatterns,
+    fetchPattern,
     isFavorite,
     toggleFavorite,
     setFavorites,
@@ -294,6 +398,10 @@ export function useStore() {
     removeFromGroup,
     assignPatternsToGroup,
     patternGroups,
+    addPatternVersion,
+    getPatternVersions,
+    restorePatternVersion,
+    deletePatternVersion,
     resetAll
   }
 }

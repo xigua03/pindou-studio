@@ -1,4 +1,4 @@
-# 📋 拼豆工坊 · 功能清单（持续更新）
+﻿# 📋 拼豆工坊 · 功能清单（持续更新）
 
 > 本文档用于存档功能清单与完成状态，防止编号定义丢失。
 > 标注：✅ 已完成 · 🟡 部分完成 · ⬜ 未做 · ➖ 用户否决/不再需要
@@ -167,3 +167,140 @@
 npm run server   # 启动后端（首次自动建库、导入内置图纸、创建 admin/admin123）
 npm run dev      # 前端开发（/api 已代理到 8787）
 ```
+
+## 八、2026-08-09 追加轮：图纸库采集与后台完善（未推送 GitHub）
+
+1. ✅ **图纸库采集定时任务**：后台「系统设置」可配置采集定时（间隔/开关），服务端按计划自动从已选来源抓取新图纸入库（失败自动跳过并记日志）。
+2. ✅ **后台管理选项扩充**：管理图纸库（采集来源勾选、预览条数、手动采集/预览/导入）、功能开关项（图纸库 / 图片转图纸 / AI 生成 / 色卡 / 豆仓 / 分享 6 项开关）。
+3. ✅ **未注册用户限制 AI 次数**：游客每日额度（ai_guest_limit，后台可调，0=关闭游客 AI）；登录用户按 ai_daily_limit 限额。
+4. ✅ **站点公告只在前台显示**：后台管理页不再出现公告内容。
+5. ✅ **后台图纸管理区分用户/自有**：内置（自有）与用户上传分开筛选与展示。
+6. ✅ **首页分类精简可展开收缩**：分类过多时折叠，可点击展开。
+7. ✅ **采集不限于单一站点**：支持 Perler 画廊 + BeadsCanvas 等多来源。
+8. ✅ **BeadPattern 画廊采集数据修复**：修复部分采集图纸打开显示「图纸不存在或已删除」的问题。
+9. ✅ **采集内容可选**：后台可勾选要采集的来源；采集图纸可在后台删除；前台不显示采集来源；去掉用户不该看到的文案（如 AI 生成里的模型名）。
+10. ✅ **首页文案动态化**：「自带 6 大品牌色卡、67 张图纸」等文案改为根据实际图纸数量动态生成。
+
+## 九、2026-08-09 第五轮：F1 / F3 / F4 / C1 / C2 / T1（未推送 GitHub）
+
+- ✅ **F1 原色预览**：结果区可切换「原色预览 / 拼豆图纸」，原色预览与图纸同一网格分辨率、跟随裁剪偏移。
+- ✅ **F3 AI 参考图模式（img2img）**：AI 生成页可上传参考图，按文字描述重绘（通义万相 wanx2.1-imageedit，description_edit）；按钮文案随参考图动态变化；参考图 <512px 自动放大。
+- ✅ **F4 大图提速（Web Worker）**：量化（nearest / Floyd-Steinberg）在格数 ≥12000 时自动转到 Web Worker，主线程不卡顿；不可用/超时/出错自动回退。
+- ✅ **C1 更多采集源**：新增 **BeadsCanvas 图纸库**（beadscanvas.com/zh/patterns），RSC 直接带完整 gridData，无需下载图片即可入库；豆格/小红书因接口未公开/登录墙暂不可接入。
+- ✅ **C2 采集预览后再入库**：后台采集新增「预览后再入库」模式，抓取预览（不入库）、缩略图网格 + 勾选 + 全选，点导入才真正入库（幂等）。
+- ✅ **T1 深色模式**：顶部导航 🌙/☀️ 切换，localStorage 持久化（pd_theme），默认跟随系统 prefers-color-scheme；通过 CSS 变量覆盖实现全站生效。
+
+## 十、2026-08-09 第六轮：后台管理重构 + 采集增强（未推送 GitHub）
+
+> 用户 6 项需求全部完成。
+
+1. ✅ **采集预览条数可选**：预览条数从固定 8 条改为下拉可选 8 / 12 / 16 / 24 / 30，后端上限同步提到 30（原 12）。
+2. ✅ **采集独立菜单**：「图纸库采集」从系统设置里拆出，成为后台独立 Tab（在图纸管理之后）。
+3. ✅ **图纸批量管理**：图纸管理表格新增复选（表头全选 / 逐行勾选）与批量操作栏：批量上架、批量下架、批量删除、批量改难度（简单/中等/复杂）；内置无来源图纸受保护不可批量删除。
+4. ✅ **AI 参考图尺寸报错修复**：参考图过小（边长 <512）上传时自动放大到至少 512px；接口报「512~4096 像素」类错误时转为友好中文提示。
+5. ✅ **后台可改 AI 服务配置**：系统设置新增「🔑 AI 服务配置」卡片，可修改生图 API 服务地址与 API Key（掩码显示、可清除回退 .env），模型名展示在服务端 .env 配置。
+6. ✅ **后台管理整体重排**：顶部 10 个横向 Tab 改为桌面端左侧分组侧边栏（概览 / 内容管理 / 运营管理 / 系统），移动端保留横向滚动标签；修复 AI 设置卡片内服务配置块嵌套错乱。
+
+### 相关改动
+- server/app.mjs：aiApiBase() / aiApiKey() / maskKey() 支持 settings 表动态配置（回退 .env）；/api/admin/patterns/batch 批量接口；采集预览 limit 上限 30。
+- src/views/AdminView.vue：侧边栏分组导航 navGroups + 移动端标签；采集独立 Tab；图纸批量管理；AI 服务配置独立卡片；布局修复。
+- src/views/AiView.vue：参考图 <512 自动放大 + 尺寸错误友好提示。
+
+## 十一、2026-08-09 第七轮：图片转图纸细节修复 + 后台用户批量（未推送 GitHub）
+
+> 用户 6 项需求，5 项已修复验证，1 项（后台用户批量）新实现。
+
+1. ✅ **中心 1×1 孤立格修复（去杂点重写）**
+   - 原 bug：removeSpeckles 只处理「四周全为空」的孤点；当 2 格小块被替换时，票数并列会选中一个不连片的颜色，从而在图纸中间制造新的 1×1 孤立点（例如 R-C.jpg 生成的 (4,35) 处 H16 孤点）。
+   - 重写 removeSpeckles：替换时优先选「能和周边连成片」的邻居色，否则清空；并反复扫描（上限 5 轮）直到不再产生新的孤立点。真实浏览器验证：55×44 生成结果小簇从 8 个 → 0 个，1×1 孤立点 0。
+   - 相关：src/utils/quantize.ts。
+
+2. ✅ **图纸库下载图纸/色号统计色号缺失**
+   - patternToCanvas：空格子也绘制网格线（外围方格不丢）；色号显示阈值从 cellSize>=10 放宽到 >=5，小格子也带色号。
+   - renderPatternSheet：最小格子从 6 提到 10，且固定 showCodes=true，下载的图纸+色号统计不再丢色号。
+   - 相关：src/utils/export.ts。
+
+3. ✅ **采集图纸底板错位（白底被当成豆子）**
+   - collector.mjs 新增 cropEmptyBorders 裁剪采集图边缘空白；白色/低饱和亮色判定从 rgb>248 放宽为 mx>=236 且 mx-mn<16，白底不再误判为豆子。
+   - 已迁移 server/data/pindou.db 中 39 条采集图纸：全部裁剪白边且 bead_count 与实心格数一致（如「小王子」87×87→85×79，豆数 7559→1421；「鬼灭之刃」43200→19086）。
+
+4. ✅ **AI 生成次数不减少**
+   - 根因：/api/ai/generate 未挂认证中间件，req.user 恒为空，登录用户也被记为游客。
+   - server/auth.mjs 新增 optionalAuth（有效 token 注入 req.user，无效按游客放行），挂到 AI 生成路由；已验证管理员/游客计数均正确。
+
+5. ✅ **图片转图纸下载外围方格丢失**
+   - 同第 2 项修复（空格子网格线绘制）。
+
+6. ✅ **后台用户管理批量功能**
+   - 后端新增 POST /api/admin/users/batch：批量启用 / 封禁 / 设为管理员 / 取消管理员 / 删除（删除级联其图纸、收藏、分组、库存、AI 记录、分享；内置 admin 账号自动跳过，不可删除/降级/封禁）。
+   - 前端用户管理表格新增表头全选 + 逐行勾选 + 批量操作栏（与图纸批量一致），选中后高亮行并显示批量按钮。
+   - 相关：server/app.mjs、src/views/AdminView.vue。
+
+### 相关改动
+- server/auth.mjs：optionalAuth 中间件。
+- server/collector.mjs：cropEmptyBorders + 白色阈值放宽。
+- server/app.mjs：/api/admin/users/batch 批量接口；AI 路由挂 optionalAuth。
+- src/utils/quantize.ts：removeSpeckles 重写（连片优先 + 反复扫描）。
+- src/utils/export.ts：空格网格线 + 小格子色号。
+- src/views/AdminView.vue：用户批量管理 UI。
+
+
+## 十二、2026-08-09 第八轮：分享归属修复 + 多板网格线 + 注销弹窗 + 各菜单批量 + SMTP 找回密码（未推送 GitHub）
+
+> 用户 5 项需求全部完成。
+
+1. ✅ **我的分享看不到已生成链接（根因修复）**
+   - 根因：POST /api/share/:id 未挂认证中间件，登录用户生成链接时 user_id 存为 NULL，个人中心 /api/shares/mine 按 user_id 查不到。
+   - 修复：该路由挂 optionalAuth（登录用户记录归属，游客仍可生成）；已验证登录后生成链接立即出现在「个人中心 → 我的分享」。
+
+2. ✅ **多板时出现非 5×5 的线**
+   - 根因：5 格参考线与板边界线同为红色，且板边界（如 29/58）不是 5 的倍数，视觉上像“错误的网格线”。
+   - 修复：5×5 网格保持红色细线（5 格一大格），板边界改为蓝色虚线（drawCoordFrame / 编辑器 box-shadow），明确表示“板边缘”而非网格线。
+
+3. ✅ **注销账号弹窗美化**
+   - 由原生 confirm/prompt 改为样式化弹窗：危险图标 + 说明 + 密码输入确认 + 取消/确认按钮 + 错误提示。
+
+4. ✅ **后台其余菜单批量管理**
+   - 新增批量接口：/api/admin/shares/batch（删除）、ai-usage/batch（删除/清空全部）、feedback/batch（删除/标记已处理）、logs/batch（删除/清空全部）、palettes/batch（删除，被图纸使用的自动跳过）。
+   - 前端五个表格均加表头全选 + 逐行勾选 + 批量操作栏 + 选中高亮；修复色卡表格全选框误引用图纸变量的问题。
+
+5. ✅ **SMTP 找回密码**
+   - 后端：password_resets 表 + POST /api/auth/forgot-password（生成 30 分钟一次性 token、SMTP 发重置邮件，不暴露邮箱是否存在）+ POST /api/auth/reset-password（校验 token 改密）+ POST /api/admin/smtp-test（测试发送）。
+   - 后台「系统设置 → 邮件服务」可配置 SMTP 服务器/端口/账号/密码/发件人并测试；未配置时前端提示联系管理员。
+   - 前端：登录页「忘记密码」弹窗输入邮箱；新增 /reset-password 页（token+email 链接进入、输入新密码提交）。
+
+### 相关改动
+- server/db.mjs：password_resets 表。
+- server/app.mjs：share 路由挂 optionalAuth；SMTP 配置/发送 + 找回密码路由 + smtp-test；shares/ai-usage/feedback/logs/palettes 批量接口；settings 增 smtp_* 配置。
+- package.json：新增 nodemailer。
+- src/views/ProfileView.vue：注销账号样式化弹窗。
+- src/views/AuthView.vue：忘记密码弹窗。
+- src/views/ResetPasswordView.vue：新页面（重置密码）。
+- src/router/index.ts：/reset-password 路由。
+- src/views/AdminView.vue：五表批量管理 UI + SMTP 设置卡片。
+- src/utils/export.ts、src/views/EditorView.vue：板边界蓝色虚线。
+- .env.example：SMTP 配置说明。
+## 十三、2026-08-09 SMTP 邮件服务修复：测试不再卡在“发送中”（未推送 GitHub）
+
+> 用户反馈：设置并保存邮件服务后，输入测试邮箱点“测试”，一直停留在“发送中”。
+
+1. ✅ **根因：nodemailer 9.0.5 与 Node 24 不兼容**
+   - 手动 node:tls 直连 smtpdm.aliyun.com:465 认证 235 正常、发送仅 280ms；但 nodemailer 的 verify/sendMail 对任意 TLS 服务器完全无响应、无日志 —— 判定为 nodemailer 9.x 兼容性 bug，已废弃该依赖。
+2. ✅ **根因：无超时保护**
+   - 后端 sendMail 无超时、前端 testSmtp 无 AbortController，SMTP 服务器一旦不响应就永远停在“发送中…”。
+3. ✅ **自研内置 SMTP 客户端 server/smtp.mjs（纯 node:net + node:tls）**
+   - 完整流程：连接 → EHLO → STARTTLS(可选) → AUTH LOGIN/PLAIN → MAIL FROM → RCPT TO → DATA → QUIT。
+   - 全步骤超时（连接 10s、步骤 20s），不会无限挂起；多行 250- 响应缓冲修复 EHLO 超时；支持 dot-stuffing、中文 Subject、MIME multipart base64。
+4. ✅ **友好错误提示**
+   - smtp-test 路由把 ENOTFOUND / ECONNREFUSED / 超时 / 认证失败映射为中文提示；前端 20s AbortController 兜底。
+5. ✅ **邮件模板优化**
+   - 新增 mailShell 品牌化邮件外壳（拼豆工坊 Logo 头 + 粉色渐变标题栏 + 圆角卡片 + 页脚），重置密码邮件增加大按钮、失效提醒、按钮失效时的明文回退链接；SMTP 测试邮件改为「配置已生效」说明页。
+   - 顺带修复：重置邮件内插值用户名未做 HTML 转义（escapeHtml），防止注入。
+
+### 实测
+- 真实发信 ok=true，约 295ms 返回；坏主机 2s 快速报错，不再挂起。
+- npm run typecheck + npm run build 通过。
+
+### 相关改动
+- 新增 server/smtp.mjs；server/app.mjs 改用内置客户端；src/views/AdminView.vue testSmtp 加超时兜底；移除 package.json 中 nodemailer 依赖。
+

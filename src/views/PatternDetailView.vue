@@ -30,8 +30,16 @@ const route = useRoute()
 const router = useRouter()
 const store = useStore()
 
-const pattern = computed<Pattern | undefined>(() => store.getPattern(String(route.params.id)))
+const pattern = ref<Pattern | undefined>(store.getPattern(String(route.params.id)))
 const palette = computed(() => (pattern.value ? getPalette(pattern.value.paletteId) : undefined))
+
+// 本地状态没有时（如采集后未刷新/旧标签页），从服务端按 id 回退拉取，避免误报“图纸不存在”
+async function loadPattern() {
+  const id = String(route.params.id)
+  const local = store.getPattern(id)
+  if (local) { pattern.value = local; return }
+  pattern.value = await store.fetchPattern(id)
+}
 
 const showCodes = ref(true)
 const showGrid = ref(true)
@@ -99,7 +107,8 @@ const progressPct = computed(() =>
   progressTotal.value ? Math.round((progressDone.value / progressTotal.value) * 100) : 0
 )
 
-onMounted(() => {
+onMounted(async () => {
+  await loadPattern()
   if (!pattern.value) return
   const raw = loadJSON<string[]>(`progress_${pattern.value.id}`, [])
   progressSet.value = new Set(raw)
@@ -109,6 +118,11 @@ onMounted(() => {
   if (gridWrap.value) fitObserver.observe(gridWrap.value)
 })
 onUnmounted(() => fitObserver?.disconnect())
+
+watch(
+  () => route.params.id,
+  () => { loadPattern() }
+)
 
 watch(
   () => pattern.value?.id,
@@ -434,12 +448,7 @@ function remove() {
       <div>
         <div class="flex items-center gap-2">
           <h1 class="text-xl font-bold text-stone-800 sm:text-2xl">{{ pattern.name }}</h1>
-          <span
-            class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-            :class="isSaved ? 'bg-sun-400/30 text-amber-700' : 'bg-brand-50 text-brand-600'"
-          >
-            {{ isSaved ? '我的图纸' : '内置图纸' }}
-          </span>
+          <span v-if="isSaved" class="rounded-full bg-sun-400/30 px-2 py-0.5 text-[11px] font-medium text-amber-700">我的图纸</span>
         </div>
         <p class="mt-1 text-sm text-stone-500">{{ pattern.description || '暂无描述' }}</p>
         <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-400">

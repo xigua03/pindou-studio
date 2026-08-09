@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { GenMode, Pattern } from '../types'
 import { PALETTES, getPalette, paletteGroups } from '../data/palettes'
@@ -83,6 +83,32 @@ const resultName = ref('我的拼豆图纸')
 const previewCell = ref(14)
 const showCodes = ref(true)
 const error = ref('')
+// F1 原色预览：看「不映射色卡的原始效果」，与拼豆图纸同一网格分辨率
+const showOriginal = ref(false)
+interface OriginalPreview { pixels: Uint8ClampedArray; w: number; h: number }
+const originalPreview = ref<OriginalPreview | null>(null)
+const originalCanvasRef = ref<HTMLCanvasElement | null>(null)
+function drawOriginalPreview() {
+  const cv = originalCanvasRef.value
+  const op = originalPreview.value
+  if (!cv || !op) return
+  const cell = Math.max(1, previewCell.value || 1)
+  cv.width = op.w * cell
+  cv.height = op.h * cell
+  const ctx = cv.getContext('2d')
+  if (!ctx) return
+  ctx.imageSmoothingEnabled = false
+  const tmp = document.createElement('canvas')
+  tmp.width = op.w
+  tmp.height = op.h
+  const tctx = tmp.getContext('2d')
+  if (!tctx) return
+  tctx.putImageData(new ImageData(new Uint8ClampedArray(op.pixels), op.w, op.h), 0, 0)
+  ctx.drawImage(tmp, 0, 0, cv.width, cv.height)
+}
+watch([showOriginal, previewCell, originalPreview], () => {
+  if (showOriginal.value) nextTick(drawOriginalPreview)
+})
 
 const palette = computed(() => getPalette(paletteId.value)!)
 
@@ -340,6 +366,7 @@ async function generate() {
   error.value = ''
   generating.value = true
   progress.value = 0
+  originalPreview.value = null
   try {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
@@ -350,7 +377,8 @@ async function generate() {
       onlyOwnedColors.value && ownedColorCount.value > 0
         ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
         : null
-    const { rows } = await quantizeImageAsync(pixels, w, h, palette.value, mode.value, (p) => (progress.value = p), undefined, exclude)
+    const qp = quantizeImageAsync(pixels, w, h, palette.value, mode.value, (p) => (progress.value = p), undefined, exclude)
+    const { rows } = await qp
 
     // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）
     let finalRows = rows
@@ -367,13 +395,36 @@ async function generate() {
     // 自动裁剪图案外的空白边距
     let outW = w
     let outH = h
+    let cropped: { rows: string[][]; x: number; y: number; w: number; h: number } | null = null
     if (autoCrop.value) {
-      const cropped = cropEmptyBorders(rows)
+      cropped = cropEmptyBorders(rows)
       if (cropped) {
         finalRows = cropped.rows
         outW = cropped.w
         outH = cropped.h
       }
+    }
+
+    // 原色预览：保存与图纸同一网格分辨率的原始像素（跟随裁剪偏移），供结果区「原色预览」切换
+    {
+      let px = pixels
+      let pw = w
+      let ph = h
+      if (cropped) {
+        const cw = cropped.w
+        const ch = cropped.h
+        const out = new Uint8ClampedArray(cw * ch * 4)
+        for (let yy = 0; yy < ch; yy++) {
+          out.set(
+            pixels.subarray(((cropped.y + yy) * w + cropped.x) * 4, ((cropped.y + yy) * w + cropped.x + cw) * 4),
+            yy * cw * 4
+          )
+        }
+        px = out
+        pw = cw
+        ph = ch
+      }
+      originalPreview.value = { pixels: px, w: pw, h: ph }
     }
 
     // 颜色数量上限：自动合并相似色，减少杂色、图案更干净（默认 32 色）
@@ -829,10 +880,22 @@ function printA4() {
         </div>
 
         <div class="flex flex-wrap items-center gap-3 rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600">
-          <label class="flex cursor-pointer items-center gap-1.5 font-medium">
+          <div class="flex items-center gap-1 rounded-lg bg-white p-1 ring-1 ring-stone-200">
+            <button
+              class="rounded-md px-2.5 py-1 font-medium transition"
+              :class="showOriginal ? 'text-stone-500 hover:text-stone-700' : 'bg-brand-500 text-white'"
+              @click="showOriginal = false"
+            >拼豆图纸</button>
+            <button
+              class="rounded-md px-2.5 py-1 font-medium transition"
+              :class="showOriginal ? 'bg-brand-500 text-white' : 'text-stone-500 hover:text-stone-700'"
+              @click="showOriginal = true"
+            >原色预览</button>
+          </div>
+          <label v-if="!showOriginal" class="flex cursor-pointer items-center gap-1.5 font-medium">
             <input v-model="showCodes" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 显示色号
           </label>
-          <label class="flex cursor-pointer items-center gap-1.5 font-medium" title="把图纸按底板补齐，外围空位显示为空格子，方便数出要空几格">
+          <label v-if="!showOriginal" class="flex cursor-pointer items-center gap-1.5 font-medium" title="把图纸按底板补齐，外围空位显示为空格子，方便数出要空几格">
             <input v-model="showMargin" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 底板外围留空
           </label>
           <span class="text-stone-300">|</span>
@@ -845,7 +908,14 @@ function printA4() {
         </div>
 
         <div class="overflow-auto rounded-xl bg-stone-50 p-4" style="max-height: 60vh">
+          <canvas
+            v-if="showOriginal"
+            ref="originalCanvasRef"
+            class="mx-auto block"
+            style="image-rendering: pixelated; max-width: 100%; height: auto"
+          ></canvas>
           <PatternGrid
+            v-else
             :pattern="displayPattern!"
             :palette="palette"
             :cell-size="previewCell"

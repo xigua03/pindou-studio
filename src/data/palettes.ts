@@ -80,6 +80,26 @@ export function getPalette(id: string): BeadPalette | undefined {
   return PALETTES.find((p) => p.id === id)
 }
 
+/**
+ * A7 色卡管理后台：后端可用时用数据库中的品牌色卡替换静态内置色卡（保留本地自定义）。
+ * 调用后 paletteGroups()/getPalette() 立即生效。
+ */
+export async function loadServerPalettes(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/palettes')
+    if (!res.ok) return false
+    const data = (await res.json()) as { palettes?: BeadPalette[] }
+    const list = (data.palettes || []).filter((p) => p && p.id && Array.isArray(p.colors) && p.colors.length)
+    if (!list.length) return false
+    const custom = PALETTES.filter((p) => p.id.startsWith(CUSTOM_PREFIX))
+    const merged = [...list, ...custom]
+    PALETTES.splice(0, PALETTES.length, ...merged)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /* ============ E25 自定义调色板（本地持久化） ============ */
 const CUSTOM_PREFIX = 'custom_'
 const builtinIds = new Set(PALETTES.map((p) => p.id))

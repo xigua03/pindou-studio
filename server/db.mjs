@@ -104,6 +104,43 @@ CREATE TABLE IF NOT EXISTS logs (
   ip TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  used INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS palettes (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  brand TEXT NOT NULL DEFAULT '国内',
+  description TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS palette_colors (
+  palette_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  hex TEXT NOT NULL,
+  r INTEGER NOT NULL DEFAULT 0,
+  g INTEGER NOT NULL DEFAULT 0,
+  b INTEGER NOT NULL DEFAULT 0,
+  grp TEXT NOT NULL DEFAULT 'C',
+  sort INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (palette_id, code)
+);
+CREATE TABLE IF NOT EXISTS ai_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  prompt TEXT NOT NULL,
+  image_base64 TEXT NOT NULL,
+  palette_id TEXT,
+  width INTEGER,
+  model TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_history_user ON ai_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_patterns_user ON patterns(user_id);
 CREATE INDEX IF NOT EXISTS idx_shares_user ON shares(user_id);
 CREATE INDEX IF NOT EXISTS idx_ai_usage_user ON ai_usage(user_id);
@@ -159,11 +196,48 @@ function migrate() {
   const pcols = cols('patterns')
   if (!pcols.has('source_label')) db.exec('ALTER TABLE patterns ADD COLUMN source_label TEXT')
   if (!pcols.has('featured')) db.exec('ALTER TABLE patterns ADD COLUMN featured INTEGER NOT NULL DEFAULT 0')
+  const ucols = cols('users')
+  if (!ucols.has('points')) db.exec('ALTER TABLE users ADD COLUMN points INTEGER NOT NULL DEFAULT 0')
+  if (!ucols.has('last_checkin_date')) db.exec('ALTER TABLE users ADD COLUMN last_checkin_date TEXT')
+  if (!ucols.has('checkin_streak')) db.exec('ALTER TABLE users ADD COLUMN checkin_streak INTEGER NOT NULL DEFAULT 0')
+  if (!ucols.has('ai_extra_date')) db.exec('ALTER TABLE users ADD COLUMN ai_extra_date TEXT')
+  if (!ucols.has('ai_extra_quota')) db.exec('ALTER TABLE users ADD COLUMN ai_extra_quota INTEGER NOT NULL DEFAULT 0')
 }
 
-/** 初始化：迁移 + 建表 + 导入内置图纸 + 种子管理员 */
+/** 色卡种子：首次建库时从 src/data/palettes/*.json 导入全部品牌色卡到数据库（已有则跳过） */
+export function seedPalettes() {
+  const n = db.prepare('SELECT COUNT(*) AS c FROM palettes').get()
+  if (n && n.c > 0) return 0
+  const dir = path.resolve(__dirname, '..', 'src', 'data', 'palettes')
+  if (!fs.existsSync(dir)) return 0
+  const pStmt = db.prepare('INSERT OR IGNORE INTO palettes (id, title, brand, description, created_at) VALUES (?,?,?,?,?)')
+  const cStmt = db.prepare('INSERT OR IGNORE INTO palette_colors (palette_id, code, hex, r, g, b, grp, sort) VALUES (?,?,?,?,?,?,?,?)')
+  const DOMESTIC = new Set(['mard-221-github', 'mard-291-github', 'mard-221-alfonse-doudou', 'coco-291', 'dodo-291', 'kaka-284', 'manman-278', 'panpan-289', 'mixiaowo-290', 'xiaowu-291', 'huangdoudou-291', 'shishi-220', 'tongqu-120', 'youken-public-174', 'artkal-m-221-official', 'artkal-c-197-official', 'artkal-c197-m221-418-official'])
+  let count = 0
+  try {
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.endsWith('.json')) continue
+      let raw
+      try { raw = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) } catch { continue }
+      if (!raw || !raw.id || !Array.isArray(raw.colors)) continue
+      const brand = DOMESTIC.has(raw.id) ? '国内' : '进口'
+      pStmt.run(String(raw.id), String(raw.title || raw.id), brand, String(raw.description || ''), Date.now())
+      raw.colors.forEach((c, i) => {
+        const rgb = Array.isArray(c.rgb) ? c.rgb : [0, 0, 0]
+        cStmt.run(String(raw.id), String(c.code), String(c.hex || ''), Number(rgb[0]) || 0, Number(rgb[1]) || 0, Number(rgb[2]) || 0, String(c.group || 'C'), i)
+      })
+      count++
+    }
+  } catch (e) {
+    console.error('色卡种子导入失败:', e.message)
+  }
+  return count
+}
+
+/** 初始化：迁移 + 建表 + 导入内置图纸/色卡 + 种子管理员 */
 export function initDb() {
   migrate()
   importBuiltinPatterns()
+  seedPalettes()
   seedAdmin()
 }

@@ -35,6 +35,20 @@ export function auth(req, res, next) {
   }
 }
 
+/** 可选认证中间件：有有效 token 则注入 req.user（用于统计归属），没有也放行（游客） */
+export function optionalAuth(req, res, next) {
+  const h = req.headers.authorization || ''
+  const token = h.startsWith('Bearer ') ? h.slice(7) : ''
+  if (!token) return next()
+  try {
+    const payload = jwt.verify(token, JWT_SECRET)
+    req.user = payload
+  } catch {
+    /* 无效 token 按游客处理 */
+  }
+  next()
+}
+
 /** 管理员中间件 */
 export function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: '没有权限' })

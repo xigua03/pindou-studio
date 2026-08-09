@@ -114,8 +114,9 @@ function cellFrameStyle(x: number, y: number): string {
   if (showCoords.value) {
     if (x > 0 && x % 5 === 0) shadows.push('inset 0.5px 0 0 rgba(224,36,36,0.55)')
     if (y > 0 && y % 5 === 0) shadows.push('inset 0 0.5px 0 rgba(224,36,36,0.55)')
-    if (x > 0 && x % boardSize.value === 0) shadows.push('inset 1.5px 0 0 rgba(224,36,36,0.85)')
-    if (y > 0 && y % boardSize.value === 0) shadows.push('inset 0 1.5px 0 rgba(224,36,36,0.85)')
+    // 板边界用蓝色虚线区分，避免与 5x5 网格线混淆
+    if (x > 0 && x % boardSize.value === 0) shadows.push('inset 1.5px 0 0 rgba(37,99,235,0.9)')
+    if (y > 0 && y % boardSize.value === 0) shadows.push('inset 0 1.5px 0 rgba(37,99,235,0.9)')
   }
   return shadows.join(', ')
 }
@@ -126,9 +127,10 @@ const hasChanges = computed(() => {
   return JSON.stringify(working.value.rows) !== JSON.stringify(originalRows.value)
 })
 
-onMounted(() => {
+onMounted(async () => {
   const id = String(route.params.id)
-  const src = store.getPattern(id)
+  let src = store.getPattern(id)
+  if (!src) src = await store.fetchPattern(id) // 本地状态没有时从服务端按 id 回退拉取
   if (!src) return
   if (src.source === 'builtin') {
     // 内置图纸：复用已存在的副本，避免重复创建
@@ -507,6 +509,50 @@ function exitEditor() {
   else if (working.value?.id) router.push('/pattern/' + working.value.id)
   else router.push('/')
 }
+
+// ---------- D20 模板库一键加载 ----------
+const showTemplates = ref(false)
+const templateSearch = ref('')
+const templates = computed(() => {
+  const q = templateSearch.value.trim().toLowerCase()
+  return store
+    .galleryPatterns()
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || p.tags.some((t) => t.toLowerCase().includes(q)))
+})
+function loadTemplate(p: Pattern) {
+  if (!working.value) return
+  if (hasChanges.value && !confirm('当前图纸有未保存修改，加载模板会覆盖当前内容，确定继续吗？')) return
+  const copy = buildPatternFromRows(p.rows.map((r) => [...r]), p.paletteId, p.name + '（副本）', 'edited', p.tags)
+  copy.description = p.description || ''
+  working.value = copy
+  originalRows.value = copy.rows.map((r) => [...r])
+  pushHistory()
+  showTemplates.value = false
+}
+
+// ---------- 图纸版本历史 ----------
+const showVersions = ref(false)
+const versions = computed(() => (working.value ? store.getPatternVersions(working.value.id) : []))
+function fmtVersionTime(ts: number): string {
+  return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+}
+function restoreVersion(ts: number) {
+  if (!working.value) return
+  if (!confirm('确定回滚到这个版本吗？当前内容会先存入历史。')) return
+  store.addPatternVersion(working.value)
+  store.restorePatternVersion(working.value.id, ts)
+  const restored = store.getPattern(working.value.id)
+  if (restored) {
+    working.value = { ...restored, rows: restored.rows.map((r) => [...r]) }
+    originalRows.value = working.value.rows.map((r) => [...r])
+    pushHistory()
+  }
+  showVersions.value = false
+}
+function deleteVersion(ts: number) {
+  if (!working.value) return
+  store.deletePatternVersion(working.value.id, ts)
+}
 </script>
 <template>
   <div v-if="working && palette" class="space-y-5">
@@ -522,6 +568,8 @@ function exitEditor() {
         <button class="btn btn-secondary" @click="rotate">⟳ 旋转90°</button>
         <button class="btn btn-secondary" @click="flipH">⇋ 左右翻转</button>
         <button class="btn btn-secondary" @click="clearAll">🧹 清空</button>
+        <button class="btn btn-secondary" @click="showTemplates = true">🧩 模板库</button>
+        <button class="btn btn-secondary" @click="showVersions = true">🗂 历史版本</button>
         <button class="btn btn-primary" @click="save">{{ saved ? '✓ 已保存' : '💾 保存' }}</button>
       </div>
     </div>
@@ -747,6 +795,52 @@ function exitEditor() {
     <p class="text-lg font-medium text-stone-600">图纸不存在</p>
     <router-link to="/" class="btn btn-primary mt-4">返回图纸库</router-link>
   </div>
+  <!-- 模板库 modal -->
+  <div v-if="showTemplates" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+    <div class="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-white p-5 shadow-xl">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-stone-800">🧩 模板库</h3>
+        <button class="rounded-lg px-2 py-1 text-sm text-stone-400 hover:bg-stone-100" @click="showTemplates = false">✕ 关闭</button>
+      </div>
+      <input v-model="templateSearch" class="input mt-3 !py-1.5" placeholder="搜索模板名称 / 标签" />
+      <div class="mt-3 grid flex-1 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+        <button
+          v-for="p in templates"
+          :key="p.id"
+          class="rounded-xl bg-stone-50 p-3 text-left ring-1 ring-stone-200 transition hover:ring-brand-400"
+          @click="loadTemplate(p)"
+        >
+          <p class="truncate text-sm font-medium text-stone-700">{{ p.name }}</p>
+          <p class="mt-1 text-[11px] text-stone-400">{{ p.width }}×{{ p.height }} 格</p>
+          <p class="mt-0.5 text-[11px] text-stone-400">点击一键加载到编辑器</p>
+        </button>
+        <p v-if="!templates.length" class="col-span-full py-8 text-center text-sm text-stone-400">没有匹配的模板</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 历史版本 modal -->
+  <div v-if="showVersions" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+    <div class="flex max-h-[80vh] w-full max-w-xl flex-col rounded-2xl bg-white p-5 shadow-xl">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-base font-semibold text-stone-800">🗂 历史版本</h3>
+        <button class="rounded-lg px-2 py-1 text-sm text-stone-400 hover:bg-stone-100" @click="showVersions = false">✕ 关闭</button>
+      </div>
+      <p class="mt-1 text-xs text-stone-400">每次「保存」前会自动把旧内容留档（最多 8 个版本），可随时回滚。</p>
+      <div class="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div v-if="!versions.length" class="py-8 text-center text-sm text-stone-400">还没有历史版本，保存几次后这里会出现。</div>
+        <div v-for="v in versions" :key="v.ts" class="flex flex-wrap items-center gap-3 rounded-xl bg-stone-50 px-4 py-3 ring-1 ring-stone-200/60">
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium text-stone-700">{{ v.name }}</p>
+            <p class="text-[11px] text-stone-400">{{ fmtVersionTime(v.ts) }} · {{ v.width }}×{{ v.height }} 格</p>
+          </div>
+          <button class="btn btn-secondary !px-2.5 !py-1 text-xs" @click="deleteVersion(v.ts)">删除</button>
+          <button class="btn btn-primary !px-2.5 !py-1 text-xs" @click="restoreVersion(v.ts)">恢复</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- unsaved changes modal -->
   <div v-if="unsavedModal" class="fixed inset-0 z-50 grid place-items-center bg-black/40">
     <div class="w-[340px] rounded-2xl bg-white p-5 shadow-xl">

@@ -93,3 +93,25 @@ body {
     display: none !important;
   }
 }
+
+/* ================= 深色模式 =================
+ * Tailwind v4 的调色板都是 CSS 变量（:root 定义），这里在 [data-theme=dark]
+ * 下整体覆盖，全站 bg-white/text-stone-* 等工具类自动跟随。 */
+[data-theme='dark'] {
+  color-scheme: dark;
+  --color-white: #1e2229;
+  --color-stone-50: #15171c;
+  --color-stone-100: #1c1f26;
+  --color-stone-200: #292e37;
+  --color-stone-300: #3a404b;
+  --color-stone-400: #8a919d;
+  --color-stone-500: #a5acb7;
+  --color-stone-600: #c1c7d0;
+  --color-stone-700: #d7dbe1;
+  --color-stone-800: #ebedf1;
+  --color-stone-900: #f6f7f9;
+}
+/* 彩色按钮/徽标上的白色文字在深色下保持白色 */
+[data-theme='dark'] .text-white { color: #fff; }
+[data-theme='dark'] .hover\:text-white:hover { color: #fff; }
+[data-theme='dark'] *::-webkit-scrollbar-thumb { background: #3a404b; }

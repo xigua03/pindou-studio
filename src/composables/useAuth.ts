@@ -26,6 +26,10 @@ export interface AiUsage {
   today: number
   limit: number
   total: number
+  /** 当日积分兑换的额外次数 */
+  extra?: number
+  /** 有效上限 = 基础限额 + 额外 */
+  effectiveLimit?: number
 }
 
 export interface SyncData {

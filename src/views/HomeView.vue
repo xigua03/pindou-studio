@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { patternBeadCount, patternDifficulty } from '../data/patterns'
 import { PALETTES, getPalette } from '../data/palettes'
 import { useStore } from '../composables/useStore'
@@ -8,22 +8,57 @@ import PatternCard from '../components/PatternCard.vue'
 
 const store = useStore()
 const config = useConfig()
+
+// 每次进入图纸库都刷新服务端图纸（采集到的新图纸无需整页刷新即可出现）
+onMounted(() => {
+  store.loadServerPatterns()
+})
 const galleryOff = computed(() => config.state.loaded && !config.featureEnabled('gallery'))
 const keyword = ref('')
-const activeTag = ref('全部')
+const activeGroup = ref('全部')
+const groupsCollapsed = ref(true)
+const MAX_GROUPS = 6
+
+// 一级分类：把零散标签归组，避免标签太多，可展开/收缩
+const GROUP_KEYWORDS: { name: string; kw: string[] }[] = [
+  { name: '动物', kw: ['动物', '猫', '熊猫', '狐狸', '恐龙', '昆虫', 'animal', 'animals', 'cat', 'budgie', 'pokemon', 'eevee', 'eeveelution', 'bird', 'dog', 'rabbit', 'bear', 'horse', 'fish', 'turtle'] },
+  { name: '卡通动漫', kw: ['卡通', '动漫', '三丽鸥', '可爱', '童话', 'cartoon', 'anime', 'kawaii', 'cute', 'character', 'hello kitty', 'sanrio', 'kitty'] },
+  { name: '游戏', kw: ['游戏', '马里奥', '宝可梦', '世界杯', '足球', 'game', 'video game', 'videogame', 'sprites', 'minecraft', 'mario', 'nintendo'] },
+  { name: '食物', kw: ['食物', '水果', '蔬菜', '甜点', 'food', 'fruit', 'cake', 'dessert', 'strawberry', 'drink', 'ice cream'] },
+  { name: '节日', kw: ['节日', '圣诞', '万圣节', '新年', '马年', '骏马', 'holiday', 'christmas', 'halloween', 'new year', 'valentine', 'easter'] },
+  { name: '植物自然', kw: ['植物', '花', '蘑菇', '森林', 'flower', 'plant', 'nature', 'mushroom', 'tree', 'leaf', 'garden'] },
+  { name: '风景天空', kw: ['风景', '天空', '星球', '太空', '彩虹', '太阳', '星星', 'sky', 'space', 'star', 'sun', 'rainbow', 'universe'] }
+]
+
+function groupsOf(p: { tags?: string[] }): string[] {
+  const tags = (p.tags ?? []).map((t) => String(t).toLowerCase())
+  const out: string[] = []
+  for (const g of GROUP_KEYWORDS) {
+    if (tags.some((t) => g.kw.some((k) => t === k || t.includes(k)))) out.push(g.name)
+  }
+  return out
+}
 // D19：难度 / 豆数筛选
 const activeDiff = ref('全部')
 const diffOptions = ['全部', '简单', '中等', '复杂']
 const beadRange = ref('全部')
 const beadRanges = ['全部', '500颗以下', '500~2000颗', '2000颗以上']
 
-const tags = computed(() => ['全部', ...new Set(store.galleryPatterns().flatMap((p) => p.tags))])
+const groups = computed(() => {
+  const map = new Map<string, number>()
+  for (const p of store.galleryPatterns()) {
+    for (const g of groupsOf(p)) map.set(g, (map.get(g) || 0) + 1)
+  }
+  return [...map.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+})
+const visibleGroups = computed(() => (groupsCollapsed.value ? groups.value.slice(0, MAX_GROUPS) : groups.value))
+const hiddenGroupCount = computed(() => Math.max(0, groups.value.length - MAX_GROUPS))
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return store.galleryPatterns().filter((p) => {
-    const matchTag = activeTag.value === '全部' || p.tags.includes(activeTag.value)
-    if (!matchTag) return false
+    const matchGroup = activeGroup.value === '全部' || groupsOf(p).includes(activeGroup.value)
+    if (!matchGroup) return false
     const diff = activeDiff.value
     if (diff !== '全部' && patternDifficulty(p) !== diff) return false
     const n = patternBeadCount(p)
@@ -56,7 +91,7 @@ const pageNumbers = computed(() => {
 function goPage(p: number) {
   page.value = Math.max(1, Math.min(p, totalPages.value))
 }
-watch([keyword, activeTag, activeDiff, beadRange, pageSize], () => {
+watch([keyword, activeGroup, activeDiff, beadRange, pageSize], () => {
   page.value = 1
 })
 
@@ -79,7 +114,7 @@ const favCount = computed(() => store.state.favorites.length)
       <div class="pointer-events-none absolute right-16 bottom-[-24px] h-32 w-32 rounded-full bg-white/10"></div>
       <h1 class="text-2xl font-bold sm:text-3xl">把喜欢的图片，变成一颗一颗的拼豆</h1>
       <p class="mt-2 max-w-xl text-sm text-white/90 sm:text-base">
-        内置 6 大品牌色卡、{{ store.galleryPatterns().length }} 张示例图纸；图片一键转图纸、豆仓库存、色号查询全部免费。
+        自带 6 大品牌色卡，图纸库持续更新（当前 {{ store.galleryPatterns().length }} 张）；图片一键转图纸、豆仓库存、色号查询全部免费。
       </p>
 
       <div class="mt-5 flex max-w-md items-center gap-2 rounded-2xl bg-white p-1.5 shadow-sm">
@@ -105,7 +140,7 @@ const favCount = computed(() => store.state.favorites.length)
     <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="card p-4 text-center">
         <p class="text-2xl font-bold text-brand-500">{{ store.galleryPatterns().length }}</p>
-        <p class="mt-1 text-xs text-stone-400">内置图纸</p>
+        <p class="mt-1 text-xs text-stone-400">图纸总数</p>
       </div>
       <div class="card p-4 text-center">
         <p class="text-2xl font-bold text-brand-500">{{ PALETTES.length }}</p>
@@ -126,13 +161,27 @@ const favCount = computed(() => store.state.favorites.length)
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="mr-1 text-xs font-medium text-stone-400">分类</span>
         <button
-          v-for="t in tags"
-          :key="t"
           class="chip"
-          :class="activeTag === t ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
-          @click="activeTag = t"
+          :class="activeGroup === '全部' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
+          @click="activeGroup = '全部'"
         >
-          {{ t }}
+          全部
+        </button>
+        <button
+          v-for="g in visibleGroups"
+          :key="g.name"
+          class="chip"
+          :class="activeGroup === g.name ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
+          @click="activeGroup = g.name"
+        >
+          {{ g.name }}<span class="ml-1 text-[10px] opacity-70">{{ g.count }}</span>
+        </button>
+        <button
+          v-if="hiddenGroupCount > 0"
+          class="chip bg-stone-100 text-stone-500 ring-stone-200"
+          @click="groupsCollapsed = !groupsCollapsed"
+        >
+          {{ groupsCollapsed ? '更多分类 ▾' : '收起分类 ▴' }}
         </button>
       </div>
 

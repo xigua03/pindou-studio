@@ -25,6 +25,12 @@ const confirmPassword = ref('')
 const pwdMsg = ref('')
 const pwdErr = ref('')
 
+// ---------- 注销账号弹窗 ----------
+const showDeleteModal = ref(false)
+const deletePwd = ref('')
+const deleteMsg = ref('')
+const deleting = ref(false)
+
 // ---------- 云同步 ----------
 const syncing = ref(false)
 const syncMsg = ref('')
@@ -66,6 +72,7 @@ onMounted(async () => {
     /* 忽略 */
   }
   loadShares()
+  loadPoints()
 })
 
 async function saveProfile() {
@@ -116,7 +123,7 @@ async function doSync() {
     const r = await auth.syncNow()
     syncMsg.value = `同步完成：已合并 ${r.pushed} 条数据到云端，并拉回 ${r.pulled} 张云端图纸`
   } catch (e) {
-    syncMsg.value = '同步失败：' + (e instanceof Error ? e.message : '请确认后端已启动')
+    syncMsg.value = '同步失败：' + (e instanceof Error ? e.message : '网络异常，请稍后再试')
   } finally {
     syncing.value = false
   }
@@ -142,15 +149,76 @@ async function deleteShare(id: string) {
   }
 }
 
-async function deleteAccount() {
-  const pwd = prompt('此操作会永久删除账号及云端数据，请输入密码确认：')
-  if (!pwd) return
+function openDeleteModal() {
+  deletePwd.value = ''
+  deleteMsg.value = ''
+  showDeleteModal.value = true
+}
+
+async function confirmDeleteAccount() {
+  deleteMsg.value = ''
+  if (!deletePwd.value) {
+    deleteMsg.value = '请输入密码确认'
+    return
+  }
+  deleting.value = true
   try {
-    await auth.deleteAccount(pwd)
-    alert('账号已注销')
+    await auth.deleteAccount(deletePwd.value)
+    showDeleteModal.value = false
     router.replace('/')
   } catch (e) {
-    alert('注销失败：' + (e instanceof Error ? e.message : '未知错误'))
+    deleteMsg.value = e instanceof Error ? e.message : '未知错误'
+  } finally {
+    deleting.value = false
+  }
+}
+
+// ---------- 签到 / 积分 ----------
+interface PointsInfo {
+  points: number
+  streak: number
+  lastCheckin: string | null
+  canCheckin: boolean
+  aiExtraToday: number
+  checkinPoints: number
+  checkinStreakBonus: number
+  exchangeCost: number
+  exchangeQuota: number
+  aiDailyLimit: number
+}
+const pointsInfo = ref<PointsInfo | null>(null)
+const pointsMsg = ref('')
+const pointsErr = ref('')
+
+async function loadPoints() {
+  try {
+    pointsInfo.value = await api<PointsInfo>('/points')
+  } catch {
+    /* 后端不可用 */
+  }
+}
+async function doCheckin() {
+  pointsErr.value = ''
+  pointsMsg.value = ''
+  try {
+    const d = await api<{ gained: number; points: number; streak: number; bonus: number }>('/checkin', { method: 'POST' })
+    pointsMsg.value = `签到成功！连续 ${d.streak} 天，+${d.gained} 积分${d.bonus ? `（连签奖励 +${d.bonus}）` : ''}`
+    loadPoints()
+    try { usage.value = await auth.aiUsage() } catch { /* ignore */ }
+  } catch (e) {
+    pointsErr.value = e instanceof Error ? e.message : '签到失败'
+  }
+}
+async function doExchange() {
+  pointsErr.value = ''
+  pointsMsg.value = ''
+  try {
+    const d = await api<{ points: number; extraToday: number }>('/ai/exchange', { method: 'POST' })
+    pointsMsg.value = `兑换成功！今日 AI 额度 +${d.extraToday} 次，剩余 ${d.points} 积分`
+    loadPoints()
+    try { usage.value = await auth.aiUsage() } catch { /* ignore */ }
+  } catch (e) {
+    pointsErr.value = e instanceof Error ? e.message : '兑换失败'
   }
 }
 
@@ -194,9 +262,34 @@ function logout() {
         </p>
       </div>
       <div class="rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-700">
-        🤖 AI 今日已用 <b>{{ usage?.today ?? '-' }}</b> / {{ usage?.limit ?? '-' }} 次
+        🤖 AI 今日已用 <b>{{ usage?.today ?? '-' }}</b> / {{ usage?.effectiveLimit ?? usage?.limit ?? '-' }} 次
         <p class="text-[11px] text-amber-500">累计 {{ usage?.total ?? 0 }} 次</p>
       </div>
+    </div>
+
+    <!-- 签到 / 积分 -->
+    <div class="card p-5">
+      <div class="flex flex-wrap items-center gap-4">
+        <div class="shrink-0">
+          <p class="text-xs text-stone-400">我的积分</p>
+          <p class="text-3xl font-bold text-amber-600">{{ pointsInfo?.points ?? '-' }}</p>
+          <p class="mt-0.5 text-[11px] text-stone-400">
+            <template v-if="pointsInfo">连续签到 {{ pointsInfo.streak }} 天 · 今日 AI 额外 +{{ pointsInfo.aiExtraToday }} 次</template>
+          </p>
+        </div>
+        <div class="min-w-0 flex-1 text-sm leading-6 text-stone-600">
+          <p>🎁 每日签到 +{{ pointsInfo?.checkinPoints ?? 10 }} 积分（连续 7 天再 +{{ pointsInfo?.checkinStreakBonus ?? 5 }}）。</p>
+          <p>⚡ {{ pointsInfo?.exchangeCost ?? 20 }} 积分兑换 {{ pointsInfo?.exchangeQuota ?? 5 }} 次当日 AI 生成额度。</p>
+        </div>
+        <div class="flex shrink-0 flex-col gap-2">
+          <button class="btn btn-primary" :disabled="!pointsInfo?.canCheckin" @click="doCheckin">
+            {{ pointsInfo?.canCheckin ? '🎁 每日签到' : '✅ 今日已签到' }}
+          </button>
+          <button class="btn btn-secondary" @click="doExchange">⚡ 积分兑换 AI 额度</button>
+        </div>
+      </div>
+      <p v-if="pointsMsg" class="mt-3 rounded-lg bg-green-50 px-3 py-2 text-xs text-green-600">{{ pointsMsg }}</p>
+      <p v-if="pointsErr" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ pointsErr }}</p>
     </div>
 
     <!-- Tab -->
@@ -308,10 +401,34 @@ function logout() {
     <!-- 危险区 -->
     <section class="card max-w-2xl border-red-100 p-5">
       <h2 class="text-sm font-semibold text-red-600">⚠️ 危险操作</h2>
-      <p class="mt-1 text-xs text-stone-500">注销账号将永久删除云端数据（本机 localStorage 数据不受影响）。</p>
+      <p class="mt-1 text-xs text-stone-500">注销账号将永久删除云端数据（本机保存的数据不受影响）。</p>
       <div class="mt-3">
-        <button class="btn btn-danger" @click="deleteAccount">注销账号</button>
+        <button class="btn btn-danger" @click="openDeleteModal">注销账号</button>
       </div>
     </section>
+
+    <!-- 注销账号确认弹窗 -->
+    <div v-if="showDeleteModal" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" @click.self="showDeleteModal = false">
+      <div class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+        <div class="flex items-start gap-3">
+          <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-red-50 text-xl">⚠️</div>
+          <div class="min-w-0 flex-1">
+            <h3 class="text-base font-semibold text-stone-800">确定要注销账号吗？</h3>
+            <p class="mt-1 text-xs leading-5 text-stone-500">此操作会<strong class="text-red-600">永久删除账号及云端数据</strong>（本机保存的数据不受影响），且无法恢复。</p>
+          </div>
+        </div>
+        <div class="mt-4">
+          <label class="mb-1 block text-xs font-medium text-stone-500">请输入登录密码确认</label>
+          <input v-model="deletePwd" type="password" class="input" placeholder="登录密码" @keydown.enter="confirmDeleteAccount" />
+        </div>
+        <p v-if="deleteMsg" class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{{ deleteMsg }}</p>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn btn-secondary" :disabled="deleting" @click="showDeleteModal = false">取消</button>
+          <button class="btn btn-danger" :disabled="deleting" @click="confirmDeleteAccount">
+            {{ deleting ? '注销中…' : '确认注销' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
