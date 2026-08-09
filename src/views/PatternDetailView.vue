@@ -499,7 +499,7 @@ function remove() {
       </div>
       <label class="mt-2 inline-flex cursor-pointer select-none items-center gap-1.5 text-xs text-stone-500">
         <input v-model="qrOn" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" />
-        <span>图片顶部生成二维码（下载图 / 色号版 / 图纸+色号统计）</span>
+        <span>图片右上角生成小二维码（下载图 / 色号版 / 图纸+色号统计）</span>
       </label>
     </div>
 

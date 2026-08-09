@@ -812,7 +812,7 @@ export function exportShoppingCSV(pattern: Pattern, palette: BeadPalette, items:
 
 
 /** 生成二维码 canvas（白底黑模块），失败返回 null */
-function makeQrCanvas(text: string, cellSize = 8, margin = 4): HTMLCanvasElement | null {
+function makeQrCanvas(text: string, cellSize = 4, margin = 3): HTMLCanvasElement | null {
   try {
     const qr = qrcode(0, 'M')
     qr.addData(text)
@@ -834,36 +834,21 @@ function makeQrCanvas(text: string, cellSize = 8, margin = 4): HTMLCanvasElement
 }
 
 /**
- * 在图纸图片顶部合成一条二维码区（白底）：左侧二维码，右侧提示文字 + 链接。
+ * 在图纸图片右侧留白边距，小尺寸二维码放在右上角（仿照参考站，无文字无网址）。
  * 适用于「下载图 / 色号版 / 图纸+色号统计」等图片导出。
  */
 export function composeWithTopQr(canvas: HTMLCanvasElement, url: string): HTMLCanvasElement {
   const qr = makeQrCanvas(url)
   if (!qr) return canvas
   const pad = 14
-  const gap = 18
-  const qrSize = qr.width
-  const stripH = qrSize + pad * 2
   const out = document.createElement('canvas')
-  out.width = Math.max(canvas.width, qrSize + gap + 230)
-  out.height = canvas.height + stripH
+  out.width = canvas.width + qr.width + pad * 2
+  out.height = canvas.height
   const ctx = out.getContext('2d')
   if (!ctx) return canvas
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, out.width, out.height)
-  ctx.drawImage(qr, pad, pad)
-  const textX = pad + qrSize + gap
-  const centerY = stripH / 2
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#1f2937'
-  ctx.font = '600 22px "Microsoft YaHei", "PingFang SC", sans-serif'
-  ctx.fillText('扫码查看 / 分享此图纸', textX, centerY - 14)
-  ctx.fillStyle = '#6b7280'
-  ctx.font = '13px "Microsoft YaHei", "PingFang SC", sans-serif'
-  const maxUrl = Math.max(20, Math.floor((out.width - textX - pad) / 7.2))
-  const urlText = url.length > maxUrl ? url.slice(0, maxUrl - 1) + '…' : url
-  ctx.fillText(urlText, textX, centerY + 16)
-  ctx.drawImage(canvas, 0, stripH)
+  ctx.drawImage(canvas, 0, 0)
+  ctx.drawImage(qr, canvas.width + pad, pad)
   return out
 }
