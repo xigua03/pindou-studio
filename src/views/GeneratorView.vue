@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt, isLineArt, bridgeLineGaps } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -79,6 +79,13 @@ const showOriginal = ref(false)
 interface OriginalPreview { pixels: Uint8ClampedArray; w: number; h: number }
 const originalPreview = ref<OriginalPreview | null>(null)
 const originalCanvasRef = ref<HTMLCanvasElement | null>(null)
+// 线条画（白底黑线简笔画）：自动检测，使用专门的描边保留算法
+const lineArt = ref(false)
+// 选项区的「原图预览」：展示上传的原图（含裁剪框），不依赖生成
+const showSrcPreview = ref(false)
+const srcPreviewRef = ref<HTMLCanvasElement | null>(null)
+// 生成时的裁剪前网格尺寸（用于结果区说明自动裁剪）
+const preCropSize = ref<{ w: number; h: number } | null>(null)
 function drawOriginalPreview() {
   const cv = originalCanvasRef.value
   const op = originalPreview.value
@@ -99,6 +106,37 @@ function drawOriginalPreview() {
 }
 watch([showOriginal, previewCell, originalPreview], () => {
   if (showOriginal.value) nextTick(drawOriginalPreview)
+})
+
+/** 选项区「原图预览」：绘制原图 + 裁剪框 */
+function drawSourcePreview() {
+  const cv = srcPreviewRef.value
+  const im = image.value
+  if (!cv || !im) return
+  const maxW = 520
+  const maxH = 360
+  const scale = Math.min(1, maxW / im.w, maxH / im.h)
+  cv.width = Math.max(1, Math.round(im.w * scale))
+  cv.height = Math.max(1, Math.round(im.h * scale))
+  const ctx = cv.getContext('2d')
+  if (!ctx) return
+  ctx.drawImage(im.el, 0, 0, cv.width, cv.height)
+  if (cropEnabled.value && cropRect.value) {
+    const r = cropRect.value
+    const sx = r.x * scale
+    const sy = r.y * scale
+    const sw = r.w * scale
+    const sh = r.h * scale
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'
+    ctx.fillRect(0, 0, cv.width, cv.height)
+    ctx.clearRect(sx, sy, sw, sh)
+    ctx.strokeStyle = '#ff7043'
+    ctx.lineWidth = 2
+    ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2)
+  }
+}
+watch([showSrcPreview, image, cropEnabled, cropRect], () => {
+  if (showSrcPreview.value) nextTick(drawSourcePreview)
 })
 
 const palette = computed(() => getPalette(paletteId.value)!)
@@ -266,6 +304,8 @@ function applyLoadedImage(el: HTMLImageElement, name: string) {
   cropRect.value = null
   cropOpen.value = false
   image.value = { el, name, w: el.naturalWidth, h: el.naturalHeight }
+  // 自动识别「白底黑线简笔画」，走描边保留算法
+  lineArt.value = isLineArt(el)
   resultName.value = name || '我的拼豆图纸'
   // 自动检测背景色（四角中位色）
   bgColor.value = rgbTripleToHex(detectBackgroundColor(el))
@@ -353,17 +393,19 @@ async function generate() {
   generating.value = true
   progress.value = 0
   originalPreview.value = null
+  preCropSize.value = null
   try {
     const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
     if (srcRect) detailScore.value = estimateDetail(image.value.el, srcRect)
-    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? saturate.value : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0, brightness.value)
+    preCropSize.value = { w, h }
+    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? saturate.value : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0, brightness.value, lineArt.value)
     // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
     const exclude =
       onlyOwnedColors.value && ownedColorCount.value > 0
         ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
         : null
-    const qp = quantizeImageAsync(pixels, w, h, palette.value, mode.value, (p) => (progress.value = p), undefined, exclude)
+    const qp = quantizeImageAsync(pixels, w, h, palette.value, lineArt.value ? 'nearest' : mode.value, (p) => (progress.value = p), undefined, exclude)
     const { rows } = await qp
 
     // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）
@@ -422,9 +464,14 @@ async function generate() {
     if (denoise.value) {
       finalRows = removeSpeckles(finalRows, 3)
     }
+    // line-art gap bridging
+    if (lineArt.value) {
+      finalRows = bridgeLineGaps(finalRows, palette.value)
+    }
 
-    // 深色描边：外边缘统一加深色轮廓，轮廓更粗更完整
-    if (outline.value) {
+
+    // 深色描边：外边缘统一加深色轮廓，轮廓更粗更完整（线条画已自带清晰描边，跳过避免加粗）
+    if (outline.value && !lineArt.value) {
       finalRows = applyOutline(finalRows, palette.value)
     }
     const id = result.value?.id ?? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -621,6 +668,14 @@ function printA4() {
             </div>
           </div>
 
+          <label class="flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
+            <input v-model="showSrcPreview" type="checkbox" class="h-3.5 w-3.5 accent-brand-500" /> 原图预览（查看原始图片与裁剪范围）
+          </label>
+          <div v-if="showSrcPreview" class="overflow-hidden rounded-xl border border-stone-200 bg-white p-2">
+            <canvas ref="srcPreviewRef" class="mx-auto block max-w-full" style="image-rendering: auto"></canvas>
+            <p class="mt-1 text-center text-[11px] text-stone-400">{{ image.w }} × {{ image.h }} px<template v-if="cropEnabled && cropRect"> · 裁剪区域 {{ cropRect.w }}×{{ cropRect.h }}（橙色框）</template></p>
+          </div>
+
           <div>
             <label class="mb-1.5 block text-xs font-medium text-stone-500">品牌色卡</label>
             <select v-model="paletteId" class="input">
@@ -632,7 +687,7 @@ function printA4() {
 
           <div>
             <div class="mb-1.5 flex items-center justify-between text-xs font-medium text-stone-500">
-              <label for="width-slider">图纸宽度（豆数）</label>
+              <label for="width-slider">生成宽度（豆数）</label>
               <span class="rounded bg-brand-50 px-1.5 py-0.5 font-mono text-brand-600">
                 {{ outputSize.w }}×{{ outputSize.h }} 豆
               </span>
@@ -651,7 +706,7 @@ function printA4() {
               <button class="ml-1 font-medium text-brand-600 hover:underline" @click="detailNote = ''">知道了</button>
             </div>
             <div class="mt-1 flex justify-between text-[10px] text-stone-300"><span>16 豆</span><span>256 豆</span></div>
-            <p class="mt-1 text-[11px] text-stone-400">上传后按图片复杂度自动选择「标准版 / 大板 / 超大版」，也可拖动自由调整；豆数越多细节越丰富。</p>
+            <p class="mt-1 text-[11px] text-stone-400">上传后按图片复杂度自动选择「标准版 / 大板 / 超大版」，也可拖动自由调整；豆数越多细节越丰富。开启「自动裁剪空白」后，实际图纸会比这里的生成尺寸小（去掉了图案外的空白格），最终格数以右侧结果为准。</p>
           </div>
 
           <div>
@@ -669,7 +724,7 @@ function printA4() {
                 :class="mode === 'floyd' ? 'bg-brand-500 text-white ring-brand-500' : 'bg-white text-stone-500 ring-stone-200 hover:bg-stone-50'"
                 @click="mode = 'floyd'"
               >
-                抖动（细节丰富）
+                抖动（细腻过渡）
               </button>
             </div>
             <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
@@ -827,6 +882,9 @@ function printA4() {
 
         <div class="flex flex-wrap gap-2 text-xs text-stone-400">
           <span>{{ result.width }} × {{ result.height }} 格</span>
+          <span v-if="preCropSize && (preCropSize.w !== result.width || preCropSize.h !== result.height)" class="rounded-full bg-stone-100 px-2 py-0.5 text-stone-500" title="生成网格尺寸与自动裁剪空白后的实际尺寸">
+            生成 {{ preCropSize.w }}×{{ preCropSize.h }} → 裁剪后 {{ result.width }}×{{ result.height }}
+          </span>
           <span>·</span>
           <span>{{ usage.length }} 种颜色</span>
           <span>·</span>

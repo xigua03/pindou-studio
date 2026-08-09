@@ -212,6 +212,32 @@ curl http://127.0.0.1:8787/api/health   # 期望返回 {"ok":true,"ai":true,"mai
 > - 若 `npm run build` 报内存不足：`NODE_OPTIONS=--max-old-space-size=2048 npm run build`。
 > - 如果只想更新后端（不涉及前端改动），可跳过第 4 步的 `npm run build`。
 
+
+### 后台「版本更新」一键在线更新
+
+后台「系统 → 版本更新」提供一键在线更新（需满足以下条件）：
+
+- 部署目录必须是 **git 仓库**（用 `git clone` 拉取的即可，上传压缩包解压的目录没有 `.git`，无法使用在线更新，请走上面的手动流程）。
+- 服务器能访问 **GitHub**（拉代码 + 查询最新版本）。
+- 服务通过 **PM2** 启动（默认进程名 `pindou`）。
+
+点击「一键更新到最新版」后，后台会自动执行：
+
+```bash
+git fetch origin <当前分支>
+git reset --hard origin/<当前分支>
+npm install
+npm run build
+pm2 restart <pm2 进程名>   # 默认 pindou，可在「系统设置 → 在线更新配置」修改
+```
+
+执行进度会实时显示在「版本更新」页（拉取代码 / 安装依赖 / 构建前端 / 重启服务）。没有 GitHub Release 时，按 `main` 分支提交对比判断是否有新版本。
+
+> ⚠️ 注意事项：
+> - `git reset --hard` 会丢弃本地**未提交**的改动；`server/data/`（数据库）与 `.env`（密钥）已被 `.gitignore` 排除，**不受影响**。
+> - 更新过程中站点会短暂不可用（构建 + 重启期间），建议在低峰期操作。
+> - 若服务器拉不动 GitHub（网络问题），更新会失败并在页面提示，请改用上方手动 `git pull` 方式。
+
 ## 九、日常运维
 
 | 操作 | 命令 |

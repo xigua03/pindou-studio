@@ -444,6 +444,276 @@ function drawImageStepped(
  * 用最近邻缩到 256 宽后统计：相邻像素完全相同比例（平坦度）+ 去重颜色数。
  * 高平坦度 + 少颜色 → 像素图，使用最近邻采样保留锐利边缘（避免平滑缩放产生灰边）。
  */
+/** 判断是否为「线条画/简笔画」：背景接近纯色且偏亮、内容以深色细线为主、颜色数很少。
+ * 这类图用常规量化容易把细线断成碎点、或被背景色吃掉，需要专门的描边保留路径。 */
+export function isLineArt(
+  img: HTMLImageElement,
+  src?: { x: number; y: number; w: number; h: number } | null
+): boolean {
+  const S = 160
+  const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
+  const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
+  const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
+  const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
+  if (sw0 <= 0 || sh0 <= 0) return false
+  const canvas = document.createElement('canvas')
+  const w = S
+  const h = Math.max(2, Math.round((S * sh0) / sw0))
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return false
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, w, h)
+  const d = ctx.getImageData(0, 0, w, h).data
+  const colors = new Set<number>()
+  const ring = 3
+  let bgSum = 0
+  let bgN = 0
+  let bgSq = 0
+  let dark = 0
+  let darkSat = 0
+  let coloredDark = 0
+  let mid = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4
+      const r = d[o]
+      const g = d[o + 1]
+      const b = d[o + 2]
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+      colors.add(((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4))
+      const onEdge = x < ring || y < ring || x >= w - ring || y >= h - ring
+      if (onEdge) {
+        bgSum += lum
+        bgN++
+        bgSq += lum * lum
+      }
+      if (lum < 85) {
+        dark++
+        const mx = Math.max(r, g, b)
+        const mn = Math.min(r, g, b)
+        darkSat += mx - mn
+        if (mx - mn > 120) coloredDark++
+      } else if (lum < 205) {
+        mid++
+      }
+    }
+  }
+  if (bgN === 0) return false
+  const bgLum = bgSum / bgN
+  const bgStd = Math.sqrt(Math.max(0, bgSq / bgN - bgLum * bgLum))
+  // 背景要偏亮（白纸/浅色底）且均匀
+  if (bgLum < 190) return false
+  if (bgStd > 42) return false
+  const total = w * h
+  const darkRatio = dark / total
+  const midRatio = mid / total
+  // 深色线条占比适中
+  if (darkRatio < 0.008 || darkRatio > 0.55) return false
+  // 中间调（抗锯齿灰边）不能太多
+  if (midRatio > 0.3) return false
+  // 颜色数要少（线条画/简笔画，抗锯齿会产生少量中间色，放宽到 160）
+  if (colors.size > 160) return false
+  // 深色像素必须是低饱和的中性色（黑/灰描边），彩色线条不算
+  const avgDarkSat = dark > 0 ? darkSat / dark : 0
+  if (avgDarkSat > 70) return false
+  // 深色里出现较多高饱和色（如红色蝴蝶结）说明是彩色卡通，不是线条画
+  if (dark > 0 && coloredDark / dark > 0.12) return false
+  return true
+}
+
+/** Otsu 阈值：把采样亮度分成前景/背景，返回最佳分界亮度 */
+function otsuThreshold(lums: Float64Array, total: number): number {
+  const hist = new Float64Array(256)
+  for (let i = 0; i < total; i++) {
+    const v = Math.max(0, Math.min(255, Math.round(lums[i])))
+    hist[v]++
+  }
+  let sumAll = 0
+  for (let t = 0; t < 256; t++) sumAll += t * hist[t]
+  let wB = 0
+  let sumB = 0
+  let bestVar = -1
+  let bestT = 128
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]
+    if (wB === 0) continue
+    const wF = total - wB
+    if (wF === 0) break
+    sumB += t * hist[t]
+    const mB = sumB / wB
+    const mF = (sumAll - sumB) / wF
+    const v = wB * wF * (mB - mF) * (mB - mF)
+    if (v > bestVar) {
+      bestVar = v
+      bestT = t
+    }
+  }
+  return bestT
+}
+
+/**
+ * 线条画专用采样：把「覆盖到深色描边的格子」整体变成深色（保留连续线条），
+ * 纯背景格子输出检测到的背景色（交给背景留空处理）。
+ * 输出与 imageToGridColors 相同的 RGBA 网格像素。
+ */
+function imageToLineArtPixels(
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+  src?: { x: number; y: number; w: number; h: number } | null
+): Uint8ClampedArray {
+  const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
+  const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
+  const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
+  const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
+  const ss = Math.max(3, Math.min(6, Math.round(1600 / Math.max(width, height))))
+  const sw = Math.max(1, Math.round(width * ss))
+  const sh = Math.max(1, Math.round(height * ss))
+  const canvas = document.createElement('canvas')
+  canvas.width = sw
+  canvas.height = sh
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawImageStepped(ctx, img, sxx, syy, sw0, sh0, sw, sh)
+  const data = ctx.getImageData(0, 0, sw, sh).data
+
+  // 检测背景色（四角采样取中位亮度像素的平均色）
+  const ring = 2
+  const bgSamples: number[] = []
+  const bgRgb: [number, number, number] = [255, 255, 255]
+  {
+    let n = 0
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const onEdge = x < ring || y < ring || x >= sw - ring || y >= sh - ring
+        if (!onEdge) continue
+        const o = (y * sw + x) * 4
+        bgSamples.push(data[o] * 0.2126 + data[o + 1] * 0.7152 + data[o + 2] * 0.0722)
+        n++
+      }
+    }
+    if (n > 0) {
+      // 取亮度中位附近的样本作为背景主色（避免主体贴边污染）
+      const sorted = [...bgSamples].sort((a, b) => a - b)
+      const med = sorted[Math.floor(sorted.length / 2)]
+      let rs2 = 0
+      let gs2 = 0
+      let bs2 = 0
+      let n2 = 0
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          const onEdge = x < ring || y < ring || x >= sw - ring || y >= sh - ring
+          if (!onEdge) continue
+          const o = (y * sw + x) * 4
+          const lum = data[o] * 0.2126 + data[o + 1] * 0.7152 + data[o + 2] * 0.0722
+          if (Math.abs(lum - med) < 24) {
+            rs2 += data[o]
+            gs2 += data[o + 1]
+            bs2 += data[o + 2]
+            n2++
+          }
+        }
+      }
+      if (n2 > 0) {
+        bgRgb[0] = Math.round(rs2 / n2)
+        bgRgb[1] = Math.round(gs2 / n2)
+        bgRgb[2] = Math.round(bs2 / n2)
+      }
+    }
+  }
+
+  // 亮度 + Otsu 阈值（限制在背景亮度以下，避免把浅色内容误判成描边）
+  const lums = new Float64Array(sw * sh)
+  for (let i = 0; i < sw * sh; i++) {
+    const o = i * 4
+    lums[i] = 0.2126 * data[o] + 0.7152 * data[o + 1] + 0.0722 * data[o + 2]
+  }
+  let thresh = otsuThreshold(lums, sw * sh)
+  const bgLum = 0.2126 * bgRgb[0] + 0.7152 * bgRgb[1] + 0.0722 * bgRgb[2]
+  const maxT = Math.max(70, bgLum - 42)
+  if (thresh > maxT) thresh = maxT
+
+  const out = new Uint8ClampedArray(width * height * 4)
+  const fx = sw / width
+  const fy = sh / height
+  const COVER_MIN = 0.24
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.floor(y * fy)
+    const y1 = Math.max(y0 + 1, Math.floor((y + 1) * fy))
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.floor(x * fx)
+      const x1 = Math.max(x0 + 1, Math.floor((x + 1) * fx))
+      let darkN = 0
+      let totalN = 0
+      for (let py = y0; py < y1; py++) {
+        const rowBase = py * sw
+        for (let px = x0; px < x1; px++) {
+          totalN++
+          if (lums[rowBase + px] < thresh) darkN++
+        }
+      }
+      const o = (y * width + x) * 4
+      const coverage = totalN > 0 ? darkN / totalN : 0
+      if (coverage >= COVER_MIN) {
+        out[o] = 12
+        out[o + 1] = 12
+        out[o + 2] = 12
+      } else {
+        out[o] = bgRgb[0]
+        out[o + 1] = bgRgb[1]
+        out[o + 2] = bgRgb[2]
+      }
+      out[o + 3] = 255
+    }
+  }
+  return out
+}
+
+/** 修补断线：把「左右或上下都是深色线条、中间空一格」的格子补成深色，让细线连续。 */
+export function bridgeLineGaps(rows: string[][], palette: BeadPalette): string[][] {
+  const h = rows.length
+  const w = h > 0 ? rows[0].length : 0
+  if (h === 0 || w === 0) return rows
+  const byCode = new Map<string, BeadColor>(palette.colors.map((c) => [c.code, c]))
+  const isDark = (code: string | undefined | null): boolean => {
+    if (!code || code === '.') return false
+    const c = byCode.get(code)
+    if (!c) return false
+    return 0.2126 * c.rgb[0] + 0.7152 * c.rgb[1] + 0.0722 * c.rgb[2] < 70
+  }
+  const isLight = (code: string | undefined | null): boolean => {
+    if (!code || code === '.') return true
+    const c = byCode.get(code)
+    if (!c) return false
+    return 0.2126 * c.rgb[0] + 0.7152 * c.rgb[1] + 0.0722 * c.rgb[2] > 210
+  }
+  const out = rows.map((r) => [...r])
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const cur = out[y][x]
+      if (isDark(cur)) continue
+      const l = out[y][x - 1]
+      const r = out[y][x + 1]
+      const u = out[y - 1]?.[x]
+      const d = out[y + 1]?.[x]
+      // 横线缺一格 / 竖线缺一格（当前格是空格或浅色时补上）
+      if (isLight(cur) && isDark(l) && isDark(r)) {
+        out[y][x] = l
+        continue
+      }
+      if (isLight(cur) && isDark(u) && isDark(d)) {
+        out[y][x] = u
+        continue
+      }
+    }
+  }
+  return out
+}
+
 export function isPixelArt(
   img: HTMLImageElement,
   src?: { x: number; y: number; w: number; h: number } | null
@@ -493,9 +763,14 @@ export function imageToGridColors(
   contrast = 0,
   src?: { x: number; y: number; w: number; h: number } | null,
   protectDark = 0.8,
-  brightness = 0
+  brightness = 0,
+  lineArt = false
 ): Uint8ClampedArray {
   // Source region (in image coordinates). When nothing is cropped we use the full image.
+  // 线条画专用路径：描边覆盖转深色 + 背景输出背景色，保证细线连续不糊
+  if (lineArt) {
+    return imageToLineArtPixels(img, width, height, src)
+  }
   const sxx = src && src.w > 0 && src.h > 0 ? src.x : 0
   const syy = src && src.w > 0 && src.h > 0 ? src.y : 0
   const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth

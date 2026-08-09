@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { db, initDb } from './db.mjs'
 import { hashPassword, verifyPassword, signToken, auth, adminOnly, optionalAuth } from './auth.mjs'
 import { collectOnce, collectPreviewItems, importPreviewItems, COLLECT_SOURCES } from './collector.mjs'
+import { getUpdateStatus, startUpdate } from './update.mjs'
 import { sendMail as smtpSendMail } from './smtp.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -885,7 +886,8 @@ app.get('/api/admin/settings', auth, adminOnly, (req, res) => {
     smtpPort: intSetting('smtp_port', 465),
     smtpUser: setting('smtp_user', ''),
     smtpPassConfigured: !!setting('smtp_pass', '') || !!process.env.SMTP_PASS,
-    smtpFrom: setting('smtp_from', '')
+    smtpFrom: setting('smtp_from', ''),
+    updatePm2Name: setting('update_pm2_name', 'pindou')
   })
 })
 
@@ -923,6 +925,7 @@ app.put('/api/admin/settings', auth, adminOnly, (req, res) => {
   if (b.smtpPass !== undefined && String(b.smtpPass).trim()) setSetting('smtp_pass', String(b.smtpPass).trim().slice(0, 500))
   if (b.smtpPassClear) setSetting('smtp_pass', '')
   if (b.smtpFrom !== undefined) setSetting('smtp_from', String(b.smtpFrom || '').trim().slice(0, 200))
+  if (b.updatePm2Name !== undefined) setSetting('update_pm2_name', String(b.updatePm2Name || '').trim().slice(0, 60))
   if (b.checkinPoints !== undefined) setSetting('checkin_points', String(Math.max(1, Math.min(1000, Number(b.checkinPoints) || 10))))
   if (b.checkinStreakBonus !== undefined) setSetting('checkin_streak_bonus', String(Math.max(0, Math.min(1000, Number(b.checkinStreakBonus) || 5))))
   if (b.exchangeCost !== undefined) setSetting('exchange_cost', String(Math.max(1, Math.min(10000, Number(b.exchangeCost) || 20))))
@@ -1286,6 +1289,28 @@ export function startCollector() {
   setTimeout(run, 30000)
   return setInterval(run, 60 * 60 * 1000)
 }
+
+/* 在线更新：检查版本 / 启动更新 */
+app.get('/api/admin/update/status', auth, adminOnly, async (req, res) => {
+  try {
+    const st = await getUpdateStatus()
+    res.json(st)
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })
+  }
+})
+
+app.post('/api/admin/update/run', auth, adminOnly, (req, res) => {
+  try {
+    const pm2Name = String((req.body || {}).pm2Name || '').trim() || setting('update_pm2_name', 'pindou') || 'pindou'
+    const r = startUpdate({ pm2Name })
+    if (!r.ok) return res.status(400).json(r)
+    log(req.user.uid, 'admin_update_run', '启动在线更新 pm2=' + pm2Name, req)
+    res.json(r)
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })
+  }
+})
 
 /* 错误处理 */
 app.use((err, req, res, next) => {

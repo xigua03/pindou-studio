@@ -8,7 +8,7 @@ import { PALETTES, getPalette } from '../data/palettes'
 const router = useRouter()
 const auth = useAuth()
 
-const tab = ref<'dashboard' | 'users' | 'patterns' | 'collect' | 'palettes' | 'shares' | 'ai' | 'feedback' | 'settings' | 'logs'>('dashboard')
+const tab = ref<'dashboard' | 'users' | 'patterns' | 'collect' | 'palettes' | 'shares' | 'ai' | 'feedback' | 'settings' | 'logs' | 'update'>('dashboard')
 const loading = ref(false)
 const err = ref('')
 
@@ -167,7 +167,8 @@ const settings = ref({
   smtpPass: '',
   smtpPassConfigured: false,
   smtpPassClear: false,
-  smtpFrom: ''
+  smtpFrom: '',
+  updatePm2Name: 'pindou'
 })
 const featureItems = [
   { key: 'gallery', label: '图纸库', icon: '🏠', desc: '首页图纸库浏览与详情' },
@@ -337,6 +338,7 @@ function switchTab(t: typeof tab.value) {
   else if (t === 'feedback') loadFeedback()
   else if (t === 'settings') loadSettings()
   else if (t === 'logs') loadLogs()
+  else if (t === 'update') loadUpdate()
 }
 
 async function loadStats() {
@@ -1097,47 +1099,66 @@ onMounted(async () => {
 })
 
 const tabs = [
-  { id: 'dashboard', label: '📊 仪表盘' },
-  { id: 'users', label: '👥 用户管理' },
-  { id: 'patterns', label: '🧩 图纸管理' },
-  { id: 'collect', label: '🗂 图纸采集' },
-  { id: 'palettes', label: '🎨 色卡管理' },
-  { id: 'shares', label: '🔗 分享管理' },
-  { id: 'ai', label: '🤖 AI 用量' },
-  { id: 'feedback', label: '💬 反馈管理' },
-  { id: 'settings', label: '⚙️ 系统设置' },
-  { id: 'logs', label: '📜 操作日志' }
+  { id: 'dashboard', label: '仪表盘' },
+  { id: 'users', label: '用户管理' },
+  { id: 'patterns', label: '图纸管理' },
+  { id: 'collect', label: '图纸采集' },
+  { id: 'palettes', label: '色卡管理' },
+  { id: 'shares', label: '分享管理' },
+  { id: 'ai', label: 'AI 用量' },
+  { id: 'feedback', label: '反馈管理' },
+  { id: 'settings', label: '系统设置' },
+  { id: 'logs', label: '操作日志' },
+  { id: 'update', label: '版本更新' }
 ] as const
 const navGroups: { label: string; items: { id: typeof tab.value; label: string }[] }[] = [
   {
     label: '概览',
-    items: [{ id: 'dashboard', label: '📊 仪表盘' }]
+    items: [{ id: 'dashboard', label: '仪表盘' }]
   },
   {
     label: '内容管理',
     items: [
-      { id: 'patterns', label: '🧩 图纸管理' },
-      { id: 'collect', label: '🗂 图纸采集' },
-      { id: 'palettes', label: '🎨 色卡管理' }
+      { id: 'patterns', label: '图纸管理' },
+      { id: 'collect', label: '图纸采集' },
+      { id: 'palettes', label: '色卡管理' }
     ]
   },
   {
     label: '运营管理',
     items: [
-      { id: 'users', label: '👥 用户管理' },
-      { id: 'shares', label: '🔗 分享管理' },
-      { id: 'feedback', label: '💬 反馈管理' }
+      { id: 'users', label: '用户管理' },
+      { id: 'shares', label: '分享管理' },
+      { id: 'feedback', label: '反馈管理' }
     ]
   },
   {
     label: '系统',
     items: [
-      { id: 'ai', label: '🤖 AI 用量' },
-      { id: 'settings', label: '⚙️ 系统设置' },
-      { id: 'logs', label: '📜 操作日志' }
+      { id: 'ai', label: 'AI 用量' },
+      { id: 'settings', label: '系统设置' },
+      { id: 'logs', label: '操作日志' },
+      { id: 'update', label: '版本更新' }
     ]
   }
 ]
+
+const NAV_PATHS: Record<string, string> = {
+  dashboard: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+  users: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+  patterns: 'M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z',
+  collect: 'M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4',
+  palettes: 'M12 21a9 9 0 110-18c4.97 0 8 2.69 8 6 0 1.66-1.34 3-3 3h-2.5a1.5 1.5 0 00-1.5 1.5c0 .39.16.75.4 1.02.28.3.6.68.6 1.1A1.38 1.38 0 0112.38 21H12z',
+  shares: 'M10 14a5 5 0 007.07 0l2.83-2.83a5 5 0 00-7.07-7.07l-1.3 1.3M14 10a5 5 0 00-7.07 0L4.1 12.83a5 5 0 007.07 7.07l1.3-1.3',
+  ai: 'M12 3v3m0 12v3m9-9h-3M6 12H3m15.36-6.36l-2.12 2.12M7.76 16.24l-2.12 2.12m12.72 0l-2.12-2.12M7.76 7.76L5.64 5.64M12 8a4 4 0 100 8 4 4 0 000-8z',
+  feedback: 'M8 10h8m-8 4h5m-9 6V7a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 4z',
+  settings: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
+  logs: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+  update: 'M4 4v5h5M20 20v-5h-5M5.6 14a7 7 0 0111.8-4.4L20 12M4 12l2.6 2.4A7 7 0 0018.4 10'
+}
+function navIcon(id: string): string {
+  return NAV_PATHS[id] || NAV_PATHS.dashboard
+}
 
 
 function pager(total: number, page: number, size: number) {
@@ -1151,6 +1172,63 @@ function pager(total: number, page: number, size: number) {
     canNext: page < pages
   }
 }
+
+
+// ---------- 版本更新 ----------
+interface UpdateStatus {
+  current: string
+  latestVersion: string
+  latestTag: string
+  releaseName: string
+  releaseNotes: string
+  publishedAt: string
+  hasUpdate: boolean
+  localCommit: string
+  remoteCommit: string
+  branch: string
+  running: boolean
+  status: { running?: boolean; step?: string; ok?: boolean; error?: string } | null
+  logTail: string
+}
+const upd = ref<UpdateStatus | null>(null)
+const updMsg = ref('')
+let updTimer: number | undefined
+
+async function loadUpdate() {
+  await run(async () => {
+    upd.value = await api<UpdateStatus>('/admin/update/status')
+  })
+}
+function pollUpdate() {
+  window.clearInterval(updTimer)
+  updTimer = window.setInterval(async () => {
+    try {
+      const st = await api<UpdateStatus>('/admin/update/status')
+      upd.value = st
+      if (!st.running && updTimer) {
+        window.clearInterval(updTimer)
+        updTimer = undefined
+      }
+    } catch {
+      /* ignore */
+    }
+  }, 4000)
+}
+async function runUpdateNow() {
+  if (!upd.value?.hasUpdate) {
+    updMsg.value = '当前没有可更新的版本'
+    return
+  }
+  if (!window.confirm('确定要执行在线更新吗？\n将拉取最新代码、安装依赖、构建前端并重启服务，期间站点会短暂不可用。')) return
+  updMsg.value = ''
+  await run(async () => {
+    await api('/admin/update/run', { method: 'POST', body: JSON.stringify({ pm2Name: settings.value.updatePm2Name }) })
+    updMsg.value = '更新任务已启动，正在后台执行…'
+    await loadUpdate()
+    pollUpdate()
+  })
+}
+
 </script>
 
 <template>
@@ -1176,10 +1254,17 @@ function pager(total: number, page: number, size: number) {
                 <button
                   v-for="t in g.items"
                   :key="t.id"
-                  class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition"
-                  :class="tab === t.id ? 'bg-brand-50 text-brand-600' : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'"
+                  class="relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition"
+                  :class="tab === t.id ? 'bg-brand-50 font-semibold text-brand-700' : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'"
                   @click="switchTab(t.id)"
                 >
+                  <span
+                    v-if="tab === t.id"
+                    class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-500"
+                  ></span>
+                  <span class="grid h-6 w-6 shrink-0 place-items-center">
+                    <svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="navIcon(t.id)" /></svg>
+                  </span>
                   {{ t.label }}
                 </button>
               </div>
@@ -1193,10 +1278,11 @@ function pager(total: number, page: number, size: number) {
         <button
           v-for="t in tabs"
           :key="t.id"
-          class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition"
+          class="flex shrink-0 items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-medium transition"
           :class="tab === t.id ? 'border-b-2 border-brand-500 text-brand-600' : 'text-stone-400 hover:text-stone-600'"
           @click="switchTab(t.id)"
         >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="navIcon(t.id)" /></svg>
           {{ t.label }}
         </button>
       </div>
@@ -1748,6 +1834,15 @@ function pager(total: number, page: number, size: number) {
         </div>
       </div>
 
+      <div class="card space-y-4 p-5">
+        <h2 class="text-sm font-semibold text-stone-700">🔄 在线更新配置</h2>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-stone-500">pm2 进程名</label>
+          <input v-model="settings.updatePm2Name" class="input !w-64" placeholder="pindou" />
+          <p class="mt-1 text-[11px] text-stone-400">仅当服务通过 pm2 启动时需要，更新完成后会自动执行 pm2 restart 该进程。</p>
+        </div>
+      </div>
+
       <p v-if="settingsMsg" class="rounded-lg bg-green-50 px-3 py-2 text-xs text-green-600">{{ settingsMsg }}</p>
       <div class="flex justify-end">
         <button class="btn btn-primary" @click="saveSettings">保存采集设置</button>
@@ -1963,6 +2058,49 @@ function pager(total: number, page: number, size: number) {
         </div>
       </div>
     </section>
+    <!-- 版本更新 -->
+    <section v-if="tab === 'update'" class="max-w-3xl space-y-4">
+      <div class="card space-y-4 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-base font-semibold text-stone-800">⬇ 版本更新</h2>
+          <button class="btn btn-secondary !px-3 !py-1.5" :disabled="loading" @click="loadUpdate">刷新状态</button>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div class="rounded-xl bg-stone-50 px-4 py-3">
+            <p class="text-xs text-stone-400">当前版本</p>
+            <p class="mt-1 text-lg font-semibold text-stone-800">{{ upd?.current || '-' }}</p>
+          </div>
+          <div class="rounded-xl bg-stone-50 px-4 py-3">
+            <p class="text-xs text-stone-400">最新版本</p>
+            <p class="mt-1 text-lg font-semibold" :class="upd?.hasUpdate ? 'text-brand-600' : 'text-stone-800'">{{ upd?.latestVersion || '未获取' }}</p>
+          </div>
+        </div>
+        <div v-if="upd" class="rounded-xl px-4 py-3" :class="upd.running ? 'bg-amber-50 text-amber-700' : upd.hasUpdate ? 'bg-green-50 text-green-700' : 'bg-stone-50 text-stone-600'">
+          <template v-if="upd.running">⏳ 正在更新中：{{ upd.status?.step || '…' }}</template>
+          <template v-else-if="upd.hasUpdate">✨ 发现新版本 {{ upd.latestVersion }}（当前 {{ upd.current }}）</template>
+          <template v-else-if="upd.latestVersion">✅ 已是最新版本（{{ upd.current }}）</template>
+          <template v-else>ℹ️ 尚未获取到远程版本信息（请检查服务器能否访问 GitHub）</template>
+        </div>
+        <p v-if="updMsg" class="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{{ updMsg }}</p>
+        <p v-if="upd?.localCommit && !upd?.latestTag" class="text-[11px] text-stone-400">本地提交 {{ upd.localCommit }} · 远程 {{ upd.remoteCommit || '未知' }}（{{ upd.branch || 'main' }} 分支）</p>
+        <p v-if="upd?.status?.error" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">上次更新失败：{{ upd.status.error }}</p>
+
+        <div v-if="upd?.releaseNotes" class="rounded-xl border border-stone-100 p-4">
+          <h3 class="mb-2 text-sm font-semibold text-stone-700">📝 更新日志（{{ upd.latestTag }}）</h3>
+          <pre class="max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-stone-50 p-3 text-xs leading-5 text-stone-600">{{ upd.releaseNotes }}</pre>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 border-t border-stone-100 pt-4">
+          <button class="btn btn-primary" :disabled="upd?.running || !upd?.hasUpdate" @click="runUpdateNow">一键更新到最新版</button>
+          <span class="text-xs text-stone-400">更新将执行：拉取代码 → 安装依赖 → 构建前端 → 重启服务（pm2）</span>
+        </div>
+        <div v-if="upd?.logTail" class="rounded-xl border border-stone-100 p-4">
+          <h3 class="mb-2 text-sm font-semibold text-stone-700">🪵 执行日志</h3>
+          <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-stone-50 p-3 font-mono text-xs leading-5 text-stone-600">{{ upd.logTail }}</pre>
+        </div>
+      </div>
+    </section>
+
     <!-- 色卡管理 -->
     <section v-if="tab === 'palettes'" class="card overflow-hidden">
       <div class="flex flex-wrap items-center gap-2 p-4">
