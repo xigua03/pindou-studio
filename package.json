@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
+    "prebuild": "node scripts/prebuild-clean.mjs",
     "preview": "vite preview",
     "server": "node server/index.mjs",
     "typecheck": "vue-tsc -b"
