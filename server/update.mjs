@@ -160,7 +160,15 @@ export async function getUpdateStatus() {
 
 export function startUpdate(opts) {
   const status = readJson(STATUS_FILE, null)
-  if (status && status.running) return { ok: false, error: '已有更新任务正在执行，请稍候再试' }
+  if (status && status.running) {
+    const started = Number(status.startedAt) || 0
+    const staleMs = Date.now() - started
+    const staleLimit = 30 * 60 * 1000 // 超过 30 分钟视为卡死，允许重新开始
+    if (staleMs < staleLimit) {
+      return { ok: false, error: '已有更新任务正在执行，请稍候再试' }
+    }
+    appendLog('检测到上一次更新任务疑似卡死（开始于 ' + new Date(started).toLocaleString('zh-CN', { hour12: false }) + '），已自动重置并重新开始')
+  }
   const script = path.join(ROOT, 'scripts', 'update.mjs')
   if (!fs.existsSync(script)) return { ok: false, error: '缺少 scripts/update.mjs 更新脚本' }
   const pm2Name = String((opts && opts.pm2Name) || 'pindou').trim() || 'pindou'

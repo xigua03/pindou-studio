@@ -1187,7 +1187,7 @@ interface UpdateStatus {
   remoteCommit: string
   branch: string
   running: boolean
-  status: { running?: boolean; step?: string; ok?: boolean; error?: string } | null
+  status: { running?: boolean; step?: string; stepStartedAt?: number; startedAt?: number; ok?: boolean; error?: string } | null
   logTail: string
 }
 const upd = ref<UpdateStatus | null>(null)
@@ -1197,7 +1197,16 @@ let updTimer: number | undefined
 async function loadUpdate() {
   await run(async () => {
     upd.value = await api<UpdateStatus>('/admin/update/status')
+    if (upd.value?.running) pollUpdate()
   })
+}
+function fmtElapsed(startedAt?: number): string {
+  if (!startedAt) return ''
+  const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  if (sec < 60) return sec + ' 秒'
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return m + ' 分 ' + s + ' 秒'
 }
 function pollUpdate() {
   window.clearInterval(updTimer)
@@ -2076,7 +2085,10 @@ async function runUpdateNow() {
           </div>
         </div>
         <div v-if="upd" class="rounded-xl px-4 py-3" :class="upd.running ? 'bg-amber-50 text-amber-700' : upd.hasUpdate ? 'bg-green-50 text-green-700' : 'bg-stone-50 text-stone-600'">
-          <template v-if="upd.running">⏳ 正在更新中：{{ upd.status?.step || '…' }}</template>
+          <template v-if="upd.running">
+            ⏳ 正在更新中：{{ upd.status?.step || '…' }}
+            <span class="ml-2 text-xs opacity-80">已运行 {{ fmtElapsed(upd.status?.startedAt) }}（超过 30 分钟无进展会自动重置，可重新点击更新）</span>
+          </template>
           <template v-else-if="upd.hasUpdate">✨ 发现新版本 {{ upd.latestVersion }}（当前 {{ upd.current }}）</template>
           <template v-else-if="upd.latestVersion">✅ 已是最新版本（{{ upd.current }}）</template>
           <template v-else>ℹ️ 尚未获取到远程版本信息（请检查服务器能否访问 GitHub）</template>
