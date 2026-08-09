@@ -1,10 +1,15 @@
 /**
  * 在线更新执行脚本：由后台「版本更新」以 detached 子进程方式启动。
- * 流程：git fetch -> git reset --hard -> npm install -> npm run build -> 重启 pm2
+ * 流程：git fetch -> git reset --hard -> npm install -> npm run build -> 后台触发重启
  * 进度实时写入 server/data/update.log 与 update-status.json，后台可随时轮询查询。
+ *
+ * 重启策略：构建完成后「先标记完成」，再用 detached 子进程后台触发
+ * pm2 restart，脚本不等待重启结果，避免服务重启杀掉更新进程导致状态卡死；
+ * 服务重启后由后端启动钩子 markUpdateRestarted() 自动把状态改为「完成」。
+ *
  * 用法：node scripts/update.mjs [pm2进程名]
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,7 +97,7 @@ function runStep(cmd, args, label) {
 
 async function main() {
   log('========== 开始在线更新 ==========')
-  writeStatus({ running: true, startedAt: Date.now(), pid: process.pid, step: '准备中', error: '', ok: false })
+  writeStatus({ running: true, startedAt: Date.now(), pid: process.pid, step: '准备中', error: '', ok: false, needsRestart: false })
 
   // 1. 检查是否为 git 仓库
   let branch = ''
@@ -113,14 +118,26 @@ async function main() {
   // 4. 构建前端
   await runStep('npm', ['run', 'build'], '构建前端 (npm run build)')
 
-  // 5. 重启服务：优先 pm2，找不到则提示手动重启
+  // 5. 重启服务：构建已完成，先标记完成，再后台触发重启（不等待，避免被服务重启中断）
+  log('构建完成，准备重启服务')
+  let pm2Ok = false
   try {
-    await runStep('pm2', ['restart', pm2Name], '重启服务 (pm2 restart ' + pm2Name + ')')
-  } catch {
-    log('未找到 pm2 进程 ' + pm2Name + '，请手动重启服务：pm2 restart ' + pm2Name + '（或 node server/index.mjs）')
+    const r = spawnSync('pm2', ['-v'], { cwd: ROOT, encoding: 'utf8', timeout: 8000 })
+    pm2Ok = r.status === 0
+  } catch { /* ignore */ }
+  if (pm2Ok) {
+    writeStatus({ running: false, ok: true, error: '', step: '构建完成，正在重启服务', needsRestart: true, finishedAt: Date.now() })
+    try {
+      const rs = spawn('pm2', ['restart', pm2Name], { cwd: ROOT, detached: true, stdio: 'ignore' })
+      rs.unref()
+      log('已后台触发 pm2 restart ' + pm2Name + '，服务重启后将自动标记完成')
+    } catch (e) {
+      log('触发 pm2 restart 失败：' + String((e && e.message) || e) + '，请手动执行 pm2 restart ' + pm2Name)
+    }
+  } else {
+    log('未找到 pm2，请手动重启服务：pm2 restart ' + pm2Name + '（或 node server/index.mjs）')
+    writeStatus({ running: false, ok: true, error: '', step: '完成（请手动重启服务）', needsRestart: false, finishedAt: Date.now() })
   }
-
-  writeStatus({ running: false, finishedAt: Date.now(), ok: true, error: '', step: '完成' })
   log('========== 更新完成 ==========')
 }
 

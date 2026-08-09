@@ -111,6 +111,11 @@ async function fetchLatestFromGithub() {
   }
 }
 
+/** 是否处于“构建完成待重启”状态（新脚本写入 needsRestart，旧卡死状态 step 含“重启服务”） */
+function isRestartPending(status) {
+  return !!(status && (status.needsRestart || String(status.step || '').includes('重启服务')))
+}
+
 export async function getUpdateStatus() {
   const status = readJson(STATUS_FILE, null)
   const current = getCurrentVersion()
@@ -140,10 +145,18 @@ export async function getUpdateStatus() {
   }
   const latestLabel = latestVersion || (remoteCommit ? remoteCommit + ' (' + (branch || 'main') + ')' : '')
   const hasUpdate = !!(latestVersion && cmpVersions(latestVersion, current) > 0) || !!(remoteCommit && remoteCommit !== localCommit)
-  // 僵尸状态识别：标记 running 但超过 30 分钟无进展（单步最长 20 分钟），视为上次更新被中断
+  // 僵尸状态识别：标记 running 但超过 30 分钟无进展（单步最长 20 分钟），视为上次更新被中断；
+  // 若已进入“构建完成待重启”状态，超过 3 分钟仍未确认重启完成，视为重启疑似失败
   let running = !!(status && status.running)
   let stale = false
-  if (running && status.startedAt) {
+  const pendingRestart = isRestartPending(status)
+  if (pendingRestart) {
+    const markAt = Number(status.finishedAt) || Number(status.startedAt) || 0
+    if (!markAt || Date.now() - markAt > 3 * 60 * 1000) {
+      running = false
+      stale = true
+    }
+  } else if (running && status.startedAt) {
     if (Date.now() - Number(status.startedAt) > 30 * 60 * 1000) {
       running = false
       stale = true
@@ -163,15 +176,16 @@ export async function getUpdateStatus() {
     branch,
     running,
     stale,
+    needsRestart: pendingRestart,
     status: status || null,
     logTail
   }
 }
 
-/** 重置更新状态：仅当没有真正在跑（非 running 或已僵尸）时允许清除 */
+/** 重置更新状态：处于“构建完成待重启 / 重启疑似失败”时允许立即重置；其余仅在非 running 或已僵尸时允许 */
 export function resetUpdateStatus() {
   const status = readJson(STATUS_FILE, null)
-  if (status && status.running) {
+  if (status && status.running && !isRestartPending(status)) {
     const started = Number(status.startedAt) || 0
     if (Date.now() - started < 30 * 60 * 1000) {
       return { ok: false, error: '更新任务正在执行中，无法重置' }
@@ -182,6 +196,26 @@ export function resetUpdateStatus() {
   } catch { /* ignore */ }
   appendLog('已手动重置更新状态（上次任务疑似中断）')
   return { ok: true }
+}
+
+/**
+ * 服务重启后由启动钩子调用：若状态仍处于“构建完成、待重启”，
+ * 说明更新脚本已成功重启服务，把状态标记为「完成」。
+ */
+export function markUpdateRestarted() {
+  const status = readJson(STATUS_FILE, null)
+  if (!isRestartPending(status)) return
+  writeJson(STATUS_FILE, {
+    ...status,
+    running: false,
+    ok: true,
+    error: '',
+    step: '完成',
+    needsRestart: false,
+    finishedAt: Date.now(),
+    restartedAt: Date.now()
+  })
+  appendLog('服务已重启，在线更新完成')
 }
 
 export function startUpdate(opts) {

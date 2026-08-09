@@ -1,9 +1,11 @@
 import app, { startCollector } from './app.mjs'
 import { initDb } from './db.mjs'
+import { markUpdateRestarted } from './update.mjs'
 
 const PORT = Number(process.env.PORT) || 8787
 
 initDb()
+markUpdateRestarted()
 startCollector()
 
 app.listen(PORT, () => {

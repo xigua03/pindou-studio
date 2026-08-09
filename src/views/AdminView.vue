@@ -1187,6 +1187,7 @@ interface UpdateStatus {
   remoteCommit: string
   branch: string
   running: boolean
+  needsRestart: boolean
   stale: boolean
   status: { running?: boolean; step?: string; stepStartedAt?: number; startedAt?: number; ok?: boolean; error?: string } | null
   logTail: string
@@ -1198,7 +1199,7 @@ let updTimer: number | undefined
 async function loadUpdate() {
   await run(async () => {
     upd.value = await api<UpdateStatus>('/admin/update/status')
-    if (upd.value?.running) pollUpdate()
+    if (upd.value?.running || upd.value?.needsRestart) pollUpdate()
   })
 }
 function fmtElapsed(startedAt?: number): string {
@@ -1215,7 +1216,7 @@ function pollUpdate() {
     try {
       const st = await api<UpdateStatus>('/admin/update/status')
       upd.value = st
-      if (!st.running && updTimer) {
+      if (!st.running && !st.needsRestart && updTimer) {
         window.clearInterval(updTimer)
         updTimer = undefined
       }
@@ -2098,12 +2099,17 @@ async function resetUpdateState() {
             ⏳ 正在更新中：{{ upd.status?.step || '…' }}
             <span class="ml-2 text-xs opacity-80">已运行 {{ fmtElapsed(upd.status?.startedAt) }}（超过 30 分钟无进展会自动重置，可重新点击更新）</span>
           </template>
+          <template v-else-if="upd.needsRestart && !upd.stale">⏳ 构建已完成，正在重启服务…（服务重启后会自动标记完成）</template>
           <template v-else-if="upd.hasUpdate">✨ 发现新版本 {{ upd.latestVersion }}（当前 {{ upd.current }}）</template>
           <template v-else-if="upd.latestVersion">✅ 已是最新版本（{{ upd.current }}）</template>
           <template v-else>ℹ️ 尚未获取到远程版本信息（请检查服务器能否访问 GitHub）</template>
         </div>
-        <div v-if="upd?.stale" class="flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          <span>⚠️ 上次更新疑似中断（已运行超过 30 分钟无进展），可重置状态后重新检查。</span>
+        <div v-if="upd?.needsRestart || upd?.stale" class="flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <span>
+            <template v-if="upd.needsRestart && !upd.stale">⏳ 构建已完成，正在重启服务…（如页面已正常访问但状态未更新，可点击重置）</template>
+            <template v-else-if="upd.stale && upd.needsRestart">⚠️ 上次更新疑似在重启服务时中断，可重置状态后重新检查。</template>
+            <template v-else>⚠️ 上次更新疑似中断（已运行超过 30 分钟无进展），可重置状态后重新检查。</template>
+          </span>
           <button class="rounded-md bg-amber-500 px-2.5 py-1 font-medium text-white hover:bg-amber-600" :disabled="loading" @click="resetUpdateState">重置更新状态</button>
         </div>
         <p v-if="updMsg" class="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{{ updMsg }}</p>
@@ -2116,7 +2122,7 @@ async function resetUpdateState() {
         </div>
 
         <div class="flex flex-wrap items-center gap-3 border-t border-stone-100 pt-4">
-          <button class="btn btn-primary" :disabled="upd?.running || !upd?.hasUpdate" @click="runUpdateNow">一键更新到最新版</button>
+          <button class="btn btn-primary" :disabled="upd?.running || upd?.needsRestart || !upd?.hasUpdate" @click="runUpdateNow">一键更新到最新版</button>
           <span class="text-xs text-stone-400">更新将执行：拉取代码 → 安装依赖 → 构建前端 → 重启服务（pm2）</span>
         </div>
         <div v-if="upd?.logTail" class="rounded-xl border border-stone-100 p-4">
