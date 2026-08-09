@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfig } from './composables/useConfig'
 import { useStore } from './composables/useStore'
@@ -14,6 +14,17 @@ const config = useConfig()
 const store = useStore()
 const menuOpen = ref(false)
 const userMenuOpen = ref(false)
+const userMenuRef = ref<HTMLElement | null>(null)
+const headerRef = ref<HTMLElement | null>(null)
+function onDocClick(e: MouseEvent) {
+  const t = e.target as Node
+  if (userMenuOpen.value && userMenuRef.value && !userMenuRef.value.contains(t)) {
+    userMenuOpen.value = false
+  }
+  if (menuOpen.value && headerRef.value && !headerRef.value.contains(t)) {
+    menuOpen.value = false
+  }
+}
 // 深色模式：localStorage 持久化，初始值已在 index.html 中提前设置到 <html data-theme>
 const theme = ref<'light' | 'dark'>(
   typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
@@ -40,6 +51,10 @@ onMounted(() => {
   config.loadConfig()
   store.loadServerPatterns()
   loadServerPalettes()
+  document.addEventListener('click', onDocClick)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
 })
 
 const navs = [
@@ -76,7 +91,7 @@ function logout() {
 
 <template>
   <div class="flex min-h-screen flex-col">
-    <header class="no-print sticky top-0 z-40 border-b border-stone-200/70 bg-white/85 backdrop-blur">
+    <header ref="headerRef" class="no-print sticky top-0 z-40 border-b border-stone-200/70 bg-white/85 backdrop-blur">
       <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4">
         <router-link to="/" class="flex shrink-0 items-center gap-2.5">
           <span class="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-xl text-white shadow-sm">🧩</span>
@@ -108,7 +123,7 @@ function logout() {
         </button>
 
         <!-- 用户区 -->
-        <div class="relative shrink-0">
+        <div ref="userMenuRef" class="relative shrink-0">
           <template v-if="isLoggedIn">
             <button
               class="flex items-center gap-1.5 rounded-xl px-2 py-1.5 text-sm transition hover:bg-stone-100"
