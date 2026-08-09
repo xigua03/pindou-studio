@@ -123,11 +123,14 @@ export async function getUpdateStatus() {
   try {
     latest = await fetchLatestFromGithub()
   } catch { /* ignore */ }
+  // 执行日志仅在有更新任务（存在状态文件）时返回，未执行过升级时不显示
   let logTail = ''
-  try {
-    const raw = fs.readFileSync(LOG_FILE, 'utf8')
-    logTail = raw.split('\n').filter(Boolean).slice(-40).join('\n')
-  } catch { /* ignore */ }
+  if (status) {
+    try {
+      const raw = fs.readFileSync(LOG_FILE, 'utf8')
+      logTail = raw.split('\n').filter(Boolean).slice(-40).join('\n')
+    } catch { /* ignore */ }
+  }
   const latestVersion = latest ? String(latest.tag).replace(/^v/i, '') : ''
   // 无 Release 时用 git 提交对比（本地 HEAD vs 远程 origin/HEAD）
   const localCommit = gitHead(true)
@@ -194,7 +197,10 @@ export function resetUpdateStatus() {
   try {
     fs.rmSync(STATUS_FILE, { force: true })
   } catch { /* ignore */ }
-  appendLog('已手动重置更新状态（上次任务疑似中断）')
+  // 重置时顺便清空执行日志，避免未升级时展示旧日志
+  try {
+    fs.writeFileSync(LOG_FILE, '')
+  } catch { /* ignore */ }
   return { ok: true }
 }
 

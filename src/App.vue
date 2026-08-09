@@ -29,7 +29,7 @@ function onDocClick(e: MouseEvent) {
 const theme = ref<'light' | 'dark'>(
   typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
 )
-const appVersion = '1.2.1'
+const appVersion = '1.2.4'
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.setAttribute('data-theme', theme.value)
