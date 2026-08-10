@@ -615,7 +615,7 @@ async function rowsFromItem(src, it) {
 /** 单源采集：抓取条目 -> 过滤 -> 新条目 PNG 转换 -> 入库 */
 async function collectSource(sourceKey, { limit = 20, excludeTags = [], maxWidth = 0, maxBeads = 0 } = {}) {
   const src = SOURCES[sourceKey]
-  const res = { source: sourceKey, label: src.label, total: 0, added: 0, skippedExisting: 0, skippedByFilter: 0, skippedNoPng: 0, errors: 0, errMsgs: [] }
+  const res = { source: sourceKey, label: src.label, total: 0, added: 0, skippedExisting: 0, skippedByFilter: 0, skippedNoPng: 0, errors: 0, errMsgs: [], addedNames: [] }
   const items = await src.fetch()
   res.total = items.length
   const insert = db.prepare(
@@ -653,6 +653,7 @@ async function collectSource(sourceKey, { limit = 20, excludeTags = [], maxWidth
       insert.run(id, null, String(it.name || it.title || id).slice(0, 80), src.desc(width, height), tags,
         'mard-221-github', width, height, JSON.stringify(rows), 'builtin', 'published', difficulty, beads, src.label, 0, Date.now(), Date.now())
       res.added++
+      res.addedNames.push(String(it.name || it.title || id).slice(0, 80))
     } catch (e) {
       res.errors++
       if (res.errMsgs.length < 5) res.errMsgs.push(String((e && e.message) || e).slice(0, 120))
@@ -753,6 +754,7 @@ export async function collectOnce({ limit = 20, sources = null, excludeTags = []
     skippedNoPng: results.reduce((a, r) => a + (r.skippedNoPng || 0), 0),
     errors: results.reduce((a, r) => a + (r.errors || 0), 0),
     errMsgs: results.flatMap((r) => r.errMsgs || []).slice(0, 10),
+    addedNames: results.flatMap((r) => r.addedNames || []),
     results
   }
 }

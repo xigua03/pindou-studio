@@ -1009,6 +1009,7 @@ function sourceLastText(s: string): string {
 function sourceLastOk(s: string): boolean {
   return !sourceLastDetail(s).errors.length
 }
+const expandedHistory = ref(-1)
 
 /** 把预览条目的 rows 渲染成缩略图 dataURL（按 mard-221 色卡上色，带缓存） */
 function previewThumb(it: CollectPreviewItem): string {
@@ -2017,10 +2018,10 @@ async function resetUpdateState() {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(h, hi) in collectStatus.history" :key="hi" class="border-t border-stone-200/60">
+                <tr v-for="(h, hi) in collectStatus.history" :key="hi" class="cursor-pointer border-t border-stone-200/60" @click="expandedHistory = expandedHistory === hi ? -1 : hi">
                   <td class="whitespace-nowrap py-1 pr-3">{{ fmtTime(h.at) }}</td>
                   <td class="whitespace-nowrap py-1 pr-3">{{ h.action === 'admin_collect_run' ? '采集' : '导入' }}</td>
-                  <td class="py-1">{{ h.detail }}</td>
+                  <td class="py-1" :title="h.detail">{{ expandedHistory === hi ? h.detail : (h.detail.length > 40 ? h.detail.slice(0, 40) + '?' : h.detail) }}</td>
                 </tr>
               </tbody>
             </table>
