@@ -1251,6 +1251,14 @@ function collectLogDetail(prefix, added, names) {
   return prefix + added + ' 条' + (list.length ? '：' + list.join('、') : '')
 }
 
+/** 采集日志详情（按来源分组）：MakeBead图纸库：a、b ｜ Perler画廊：c */
+function collectDetailBySources(results) {
+  const parts = (results || [])
+    .filter((r) => r && r.added)
+    .map((r) => (r.label || r.source) + '：' + (r.addedNames || []).slice(0, 8).join('、'))
+  return parts.length ? parts.join(' ｜ ') : ''
+}
+
 app.post('/api/admin/collect/run', auth, adminOnly, async (req, res) => {
   try {
     const limit = Math.min(30, Math.max(1, intSetting('collect_limit', 10)))
@@ -1259,7 +1267,8 @@ app.post('/api/admin/collect/run', auth, adminOnly, async (req, res) => {
     const result = await collectOnce({ limit, sources, excludeTags, maxWidth, maxBeads })
     setSetting('collect_last_run_at', String(Date.now()))
     setSetting('collect_last_result', JSON.stringify(result))
-    log(req.user.uid, 'admin_collect_run', collectLogDetail('手动采集完成 新增', result.added, result.addedNames), req)
+    const namesBySrc = collectDetailBySources(result.results)
+    log(req.user.uid, 'admin_collect_run', '手动采集完成 新增' + result.added + ' 条' + (namesBySrc ? '：' + namesBySrc : ''), req)
     res.json({ ok: true, result })
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })
@@ -1287,7 +1296,9 @@ app.post('/api/admin/collect/import', auth, adminOnly, (req, res) => {
     const items = (req.body || {}).items
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: '请先选择要导入的图纸' })
     const result = importPreviewItems(items)
-    log(req.user.uid, 'admin_collect_import', collectLogDetail('手动导入 ', result.added, (items || []).filter((_, i) => i < 12).map((it) => String(it.name || it.id || '').slice(0, 60))), req)
+    const srcSite = items[0] && items[0].sourceLabel ? '(' + items[0].sourceLabel + ')' : ''
+    const impNames = (items || []).filter((_, i) => i < 12).map((it) => String(it.name || it.id || '').slice(0, 60))
+    log(req.user.uid, 'admin_collect_import', collectLogDetail('手动导入 ' + srcSite + ' ', result.added, impNames), req)
     res.json({ ok: true, result })
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) })
@@ -1308,7 +1319,8 @@ export function startCollector() {
       const result = await collectOnce({ limit, sources, excludeTags, maxWidth, maxBeads })
       setSetting('collect_last_run_at', String(Date.now()))
       setSetting('collect_last_result', JSON.stringify(result))
-      log(null, 'admin_collect_run', collectLogDetail('定时采集完成 新增', result.added, result.addedNames), null)
+      const namesBySrc = collectDetailBySources(result.results)
+      log(null, 'admin_collect_run', '定时采集完成 新增' + result.added + ' 条' + (namesBySrc ? '：' + namesBySrc : ''), null)
       console.log('[collector] 定时采集完成:', JSON.stringify(result))
     } catch (e) {
       console.error('[collector] 定时采集失败:', (e && e.message) || e)
