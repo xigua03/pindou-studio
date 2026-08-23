@@ -9,6 +9,7 @@ import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
 import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildGrowBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt, isLineArt, bridgeLineGaps, selectAdaptivePalette, computeUsedCounts } from '../utils/quantize'
+import { generateBestPattern } from '../utils/patternScoring'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -46,11 +47,11 @@ const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
 const cropOpen = ref(false) // 裁剪面板是否展开（确认后收起面板但保留裁剪选区）
 // 对比度（-50 ~ +50，0 不变）
-const contrast = ref(10)
+const contrast = ref(8)
 // 亮度（-50 ~ +50，0 不变）
 const brightness = ref(0)
-// 饱和度（0.5 ~ 2.0，1 不变；默认 1.3 增强）
-const saturate = ref(1.3)
+// 饱和度（0.5 ~ 2.0，1 不变；默认 1.6，通用自动生成更稳）
+const saturate = ref(1.6)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
 const maxColors = ref(32)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
@@ -78,6 +79,9 @@ const error = ref('')
 const showOriginal = ref(false)
 interface OriginalPreview { pixels: Uint8ClampedArray; w: number; h: number }
 const originalPreview = ref<OriginalPreview | null>(null)
+// 自动生成模式：默认只显示「一键生成」；高级调参入口后续可折叠到“高级设置”
+const autoMode = ref(true)
+const showAdvanced = ref(false)
 const originalCanvasRef = ref<HTMLCanvasElement | null>(null)
 // 线条画（白底黑线简笔画）：自动检测，使用专门的描边保留算法
 const lineArt = ref(false)
@@ -395,118 +399,27 @@ async function generate() {
   originalPreview.value = null
   preCropSize.value = null
   try {
-    const { w, h } = outputSize.value
     const srcRect = cropEnabled.value && cropRect.value ? cropRect.value : null
     if (srcRect) detailScore.value = estimateDetail(image.value.el, srcRect)
-    preCropSize.value = { w, h }
-    const pixels = imageToGridColors(image.value.el, w, h, detail.value, enhance.value ? saturate.value : 1, sharpen.value ? 0.8 : 0, contrast.value, srcRect, protectDark.value ? (isComplex.value ? 0.35 : 0.8) : 0, brightness.value, lineArt.value)
-    // 仅用手头颜色：把豆仓里没有的颜色排除，自动映射到最近的有色
-    const exclude =
-      onlyOwnedColors.value && ownedColorCount.value > 0
-        ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
-        : null
-    // 自适应调色板：按图片颜色聚类选出最能代表图片的 maxColors 个色号直接量化，
-    // 比「全色卡量化后再合并」更干净（颜色区分度高、几乎没有僵尸色号）
-    let quantPalette = palette.value
-    if (maxColors.value > 0) {
-      const avail =
-        exclude && exclude.size > 0
-          ? { ...palette.value, colors: palette.value.colors.filter((c) => !exclude.has(c.code)) }
-          : palette.value
-      if (avail.colors.length > maxColors.value) {
-        const selected = selectAdaptivePalette(
-          pixels,
-          w,
-          h,
-          avail,
-          maxColors.value,
-          backgroundFromHex(bgColor.value, bgThreshold.value)
-        )
-        quantPalette = { ...avail, colors: selected }
-      } else {
-        quantPalette = avail
-      }
-    }
-    const qp = quantizeImageAsync(pixels, w, h, quantPalette, lineArt.value ? 'nearest' : mode.value, (p) => (progress.value = p), undefined, exclude)
-    const { rows } = await qp
+    preCropSize.value = { w: outputSize.value.w, h: outputSize.value.h }
 
-    // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）。
-    // 用区域生长抠图：渐变背景（天空/灯光等）也能整片抠掉
-    let finalRows = rows
-    if (removeBg.value) {
-      const mask = buildGrowBgMask(pixels, w, h, backgroundFromHex(bgColor.value, bgThreshold.value))
-      finalRows = emptyOuterBackground(finalRows, mask)
-    }
+    const best = await generateBestPattern(
+      {
+        image: image.value.el,
+        palette: palette.value,
+        srcRect,
+        userWidth: outputSize.value.w,
+        userMaxColors: maxColors.value,
+        exclude: onlyOwnedColors.value && ownedColorCount.value > 0
+          ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
+          : null,
+        mode: mode.value,
+        bgColor: bgColor.value,
+        bgThreshold: bgThreshold.value,
+      },
+      (p) => (progress.value = p)
+    )
 
-    // 智能抠图：从边缘泛洪去除连通背景（比纯色阈值更稳，主体贴边也可用）
-    if (smartBg.value) {
-      finalRows = emptyOuterBackground(finalRows, buildBorderBgMask(pixels, w, h, borderTol.value))
-    }
-
-    // 自动裁剪图案外的空白边距
-    let outW = w
-    let outH = h
-    let cropped: { rows: string[][]; x: number; y: number; w: number; h: number } | null = null
-    if (autoCrop.value) {
-      cropped = cropEmptyBorders(rows)
-      if (cropped) {
-        finalRows = cropped.rows
-        outW = cropped.w
-        outH = cropped.h
-      }
-    }
-
-    // 原色预览：保存与图纸同一网格分辨率的原始像素（跟随裁剪偏移），供结果区「原色预览」切换
-    {
-      let px = pixels
-      let pw = w
-      let ph = h
-      if (cropped) {
-        const cw = cropped.w
-        const ch = cropped.h
-        const out = new Uint8ClampedArray(cw * ch * 4)
-        for (let yy = 0; yy < ch; yy++) {
-          out.set(
-            pixels.subarray(((cropped.y + yy) * w + cropped.x) * 4, ((cropped.y + yy) * w + cropped.x + cw) * 4),
-            yy * cw * 4
-          )
-        }
-        px = out
-        pw = cw
-        ph = ch
-      }
-      originalPreview.value = { pixels: px, w: pw, h: ph }
-    }
-
-    // 颜色数量上限：自动合并相似色，减少杂色、图案更干净（默认 32 色）
-    if (maxColors.value > 0) {
-      finalRows = limitColorCount(finalRows, palette.value, maxColors.value).rows
-      // 去杂色：用量极少的颜色合并到最近常用色（避免为了几颗豆专门买一种颜色）。
-      // 像素画/线条画可能有意保留少量细节色，跳过不做
-      const isPixel = isPixelArt(image.value.el, srcRect)
-      if (!isPixel && !lineArt.value) {
-        const counts = computeUsedCounts(finalRows)
-        let total = 0
-        for (const n of counts.values()) total += n
-        const noiseMin = Math.max(3, Math.min(12, Math.round(total * 0.001)))
-        finalRows = mergePatternColors(finalRows, palette.value, { mergeThreshold: 0, noiseMinCount: noiseMin }).rows
-      }
-    }
-
-    // 去杂点：删除孤立的单色噪点，让照片类图纸更干净（细线/描边受保护）
-    if (denoise.value) {
-      finalRows = removeSpeckles(finalRows, 4)
-    }
-    // line-art gap bridging
-    if (lineArt.value) {
-      finalRows = bridgeLineGaps(finalRows, palette.value)
-    }
-
-
-    // 深色描边：外边缘统一加深色轮廓，轮廓更粗更完整（线条画已自带清晰描边，跳过避免加粗）
-    if (outline.value && !lineArt.value) {
-      finalRows = applyOutline(finalRows, palette.value)
-    }
     const id = result.value?.id ?? `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const pat: Pattern = {
       id,
@@ -514,17 +427,20 @@ async function generate() {
       description: '由图片自动生成的拼豆图纸',
       tags: ['图片转图纸'],
       paletteId: paletteId.value,
-      width: outW,
-      height: outH,
-      rows: finalRows,
+      width: best.width,
+      height: best.height,
+      rows: best.rows,
       source: 'generated',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     }
     result.value = pat
     remapPaletteId.value = paletteId.value
-    // 预览格子自适应：大图默认用较小格子，避免一拖就变得很大
-    previewCell.value = Math.max(6, Math.min(16, Math.floor(1000 / (outW + 1))))
-    // 内容相同则复用已有图纸的 id（不新增重复）
+    previewCell.value = Math.max(6, Math.min(16, Math.floor(1000 / (best.width + 1))))
+    originalPreview.value = {
+      pixels: best.previewPixels,
+      w: best.previewW,
+      h: best.previewH,
+    }
     pat.id = store.savePattern(pat)
   } catch {
     error.value = '生成失败，请重试'
@@ -742,8 +658,13 @@ function printA4() {
             <p class="mt-1 text-[11px] text-stone-400">上传后按图片复杂度自动选择「标准版 / 大板 / 超大版」，也可拖动自由调整；豆数越多细节越丰富。开启「自动裁剪空白」后，实际图纸会比这里的生成尺寸小（去掉了图案外的空白格），最终格数以右侧结果为准。</p>
           </div>
 
-          <div>
-            <label class="mb-1.5 block text-xs font-medium text-stone-500">配色算法</label>
+          <button class="btn btn-secondary w-full !py-2 text-sm" @click="showAdvanced = !showAdvanced">
+            {{ showAdvanced ? '收起高级设置' : '展开高级设置' }}
+          </button>
+
+          <div v-if="showAdvanced">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-stone-500">配色算法</label>
             <div class="grid grid-cols-2 gap-2">
               <button
                 class="rounded-xl px-3 py-2 text-xs font-medium ring-1 transition"
@@ -879,6 +800,7 @@ function printA4() {
               </label>
               <p class="text-[11px] leading-4 text-stone-400">与背景色接近的格子会留空不拼豆（默认开启），生成后自动裁掉图案外的空白边距，用豆统计也只算图案部分。</p>
             </div>
+          </div>
           </div>
 
           <button class="btn btn-secondary w-full !py-2.5" :disabled="generating || !image" @click="applyBeadStyle">

@@ -754,6 +754,11 @@ export function isPixelArt(
     }
   }
   const flatness = total > 0 ? equal / total : 0
+  // 大尺寸扁平插画不是像素画：真实像素画源图通常很小（<=512px），
+  // 2048px 级的扁平插画（如蜡笔纹理小怪物）会被误判，导致
+  // 跳过「按主体占比放大网格」与噪声色合并，细节（描边/五官）丢失
+  const maxSide = Math.max(sw0, sh0)
+  if (maxSide > 512) return false
   return flatness >= 0.45 && colors.size <= 300
 }
 export function imageToGridColors(
