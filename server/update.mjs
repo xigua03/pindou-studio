@@ -86,29 +86,35 @@ async function fetchLatestFromGithub() {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
   const headers = { 'User-Agent': 'pindou-studio', Accept: 'application/vnd.github+json' }
+  let releaseInfo = null
+  let tagInfo = null
   try {
     const res = await fetch('https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest', { headers, signal: controller.signal })
     if (res.ok) {
       const j = await res.json()
-      return { tag: j.tag_name, name: j.name || '', notes: j.body || '', publishedAt: j.published_at || '' }
+      releaseInfo = { tag: j.tag_name, name: j.name || '', notes: j.body || '', publishedAt: j.published_at || '' }
     }
-    if (res.status === 404) {
-      // 尚未发布 Release，回退读取 tags
-      const res2 = await fetch('https://api.github.com/repos/' + GITHUB_REPO + '/tags', { headers, signal: controller.signal })
-      if (res2.ok) {
-        const tags = await res2.json()
-        if (Array.isArray(tags) && tags.length) {
-          const t = tags[0]
-          return { tag: t.name, name: t.name, notes: '', publishedAt: '' }
-        }
+  } catch { /* ignore */ }
+  // 无论 Release 是否存在都读取 tags 取最高版本：只打 tag 未发 Release 时，
+  // releases/latest 会停留在旧版（如 v1.3.0），导致漏判「有新版本」
+  try {
+    const res2 = await fetch('https://api.github.com/repos/' + GITHUB_REPO + '/tags?per_page=100', { headers, signal: controller.signal })
+    if (res2.ok) {
+      const tags = await res2.json()
+      if (Array.isArray(tags) && tags.length) {
+        const versionLike = tags.map((t) => String(t.name)).filter((n) => /^v?\d+\.\d+\.\d+/.test(n))
+        tagInfo = versionLike.length ? versionLike.sort((a, b) => cmpVersions(b, a))[0] : String(tags[0].name)
       }
     }
-    return null
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
+  } catch { /* ignore */ }
+  clearTimeout(timer)
+  if (releaseInfo && tagInfo) {
+    // 取 Release 与 tags 中版本更高的那个，保证发版后立即被检测到
+    return cmpVersions(tagInfo, releaseInfo.tag) > 0
+      ? { tag: tagInfo, name: tagInfo, notes: '', publishedAt: '' }
+      : releaseInfo
   }
+  return releaseInfo || (tagInfo ? { tag: tagInfo, name: tagInfo, notes: '', publishedAt: '' } : null)
 }
 
 /** 是否处于“构建完成待重启”状态（新脚本写入 needsRestart，旧卡死状态 step 含“重启服务”） */
