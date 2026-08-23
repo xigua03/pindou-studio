@@ -80,7 +80,29 @@ export const CANDIDATE_PRESETS: CandidateConfig[] = [
     contrast: 5,
     brightness: 0,
     protectDark: 0.9,
-    maxColors: 24,
+    maxColors: 20,
+    removeBg: true,
+    bgThreshold: 18,
+    smartBg: true,
+    borderTol: 30,
+    denoise: true,
+    outline: false,
+    mode: 'nearest',
+    autoCrop: true,
+    onlyOwnedColors: false,
+    weight: 1.3,
+  },
+  {
+    label: 'minimal',
+    width: 0,
+    detail: 2,
+    enhance: true,
+    saturate: 1.4,
+    sharpen: false,
+    contrast: 5,
+    brightness: 0,
+    protectDark: 0.9,
+    maxColors: 16,
     removeBg: true,
     bgThreshold: 18,
     smartBg: true,
@@ -112,7 +134,7 @@ export const CANDIDATE_PRESETS: CandidateConfig[] = [
     mode: 'nearest',
     autoCrop: true,
     onlyOwnedColors: false,
-    weight: 0.92,
+    weight: 0.85,
   },
   {
     label: 'outline',
@@ -134,7 +156,7 @@ export const CANDIDATE_PRESETS: CandidateConfig[] = [
     mode: 'nearest',
     autoCrop: true,
     onlyOwnedColors: false,
-    weight: 1.08,
+    weight: 1.05,
   },
   {
     label: 'bgClean',
@@ -170,12 +192,12 @@ export interface ScoringWeights {
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
-  color: 18,
-  speckle: 22,
-  hole: 20,
-  line: 20,
+  color: 16,
+  speckle: 25,
+  hole: 22,
+  line: 18,
   bg: 12,
-  detail: 8,
+  detail: 7,
 }
 
 export interface PatternScore {
@@ -312,18 +334,31 @@ function measureBgResidual(rows: string[][]): number {
   const h = rows.length
   if (h === 0) return 1
   const w = rows[0].length
-  const border = Math.min(2, Math.floor(Math.min(w, h) / 4))
-  let borderHoles = 0
-  let borderCells = 0
+  const border = Math.min(4, Math.floor(Math.min(w, h) / 4))
+  let badCells = 0
+  let totalCells = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const isBorder = x < border || y < border || x >= w - border || y >= h - border
-      if (!isBorder) continue
-      borderCells++
-      if (rows[y][x] === '.') borderHoles++
+      if (isBorder) {
+        totalCells++
+        if (rows[y][x] === '.') badCells++
+        continue
+      }
+      // 内部洞：四周全被豆包围的空格，属于背景残留/抠图挖出的空洞，最影响可拼性
+      if (rows[y][x] === '.') {
+        let surrounded = true
+        for (const [dx, dy] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]] as const) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || rows[ny][nx] === '.') { surrounded = false; break }
+        }
+        if (surrounded) badCells++
+        totalCells++
+      }
     }
   }
-  return borderCells > 0 ? 1 - borderHoles / borderCells : 1
+  return totalCells > 0 ? 1 - badCells / totalCells : 1
 }
 
 function measureDetailPreservation(rows: string[][]): number {
@@ -372,9 +407,9 @@ export function scorePattern(
   const bgResidual = measureBgResidual(rows)
   const detailPreservation = measureDetailPreservation(rows)
 
-  const colorScore = Math.max(0, 20 * (1 - Math.min(1, colorCount / Math.max(maxColors, 8))))
-  const speckleScore = Math.max(0, 20 * (1 - Math.min(1, speckleCells / Math.max(totalBeads * 0.01, 1))))
-  const holeScore = Math.max(0, 20 * (1 - Math.min(1, holes / Math.max(totalBeads * 0.05, 1))))
+  const colorScore = Math.max(0, 20 * (1 - Math.min(1, Math.max(0, colorCount - 4) / Math.max(maxColors * 0.9, 10))))
+  const speckleScore = Math.max(0, 20 * (1 - Math.min(1, speckleCells / Math.max(totalBeads * 0.005, 2))))
+  const holeScore = Math.max(0, 20 * (1 - Math.min(1, holes / Math.max(totalBeads * 0.01, 2))))
   const lineScore = lineContinuity * 20
   const bgScore = bgResidual * 20
   const detailScore = detailPreservation * 20
@@ -429,8 +464,8 @@ export function selectBestPattern(
 }
 
 function chooseAutoWidth(detail: number, ratio: number): number {
-  const base = detail < 50 ? 58 : detail < 170 ? 87 : 116
-  const boosted = Math.min(256, Math.max(base, Math.round(base / Math.max(0.5, ratio))))
+  const base = detail < 50 ? 56 : detail < 170 ? 80 : 100
+  const boosted = Math.min(144, Math.max(base, Math.round(base / Math.max(0.5, ratio))))
   return boosted
 }
 
@@ -536,7 +571,7 @@ export async function generateCandidate(
       const counts = computeUsedCounts(finalRows)
       let total = 0
       for (const n of counts.values()) total += n
-      const noiseMin = Math.max(3, Math.min(12, Math.round(total * 0.001)))
+      const noiseMin = Math.max(4, Math.min(16, Math.round(total * 0.0025)))
       finalRows = mergePatternColors(finalRows, palette, { mergeThreshold: 0, noiseMinCount: noiseMin }).rows
     }
   }
@@ -544,6 +579,19 @@ export async function generateCandidate(
   if (config.denoise) finalRows = removeSpeckles(finalRows, 4)
   if (lineArt) finalRows = bridgeLineGaps(finalRows, palette)
   if (config.outline && !lineArt) finalRows = applyOutline(finalRows, palette)
+
+  // 收尾清理：最后再合并一次「用量极少」的颜色，避免出现「为了几颗豆专门买一种色」的情况
+  if (!lineArt) {
+    const counts = computeUsedCounts(finalRows)
+    let total = 0
+    for (const n of counts.values()) total += n
+    const minKeep = Math.max(3, Math.min(8, Math.round(total * 0.0015)))
+    if (minKeep > 2) {
+      finalRows = mergePatternColors(finalRows, palette, { mergeThreshold: 0, noiseMinCount: minKeep }).rows
+      // 合并后可能出现新的孤立小簇，再清一遍杂点
+      finalRows = removeSpeckles(finalRows, 3)
+    }
+  }
 
   const totalBeads = finalRows.reduce((sum, row) => sum + row.filter((c) => c !== '.').length, 0)
   return {

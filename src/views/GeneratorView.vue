@@ -298,9 +298,9 @@ const isComplex = computed(() => detailScore.value >= 200)
 
 /** 按图片细节复杂度自动选择默认图纸尺寸档位（标准版/大板/超大版） */
 function pickTier(detail: number): { label: string; width: number } {
-  if (detail < 50) return { label: '标准版', width: 58 }
-  if (detail < 170) return { label: '大板', width: 87 }
-  return { label: '超大版', width: 116 }
+  if (detail < 50) return { label: '标准版', width: 48 }
+  if (detail < 170) return { label: '大板', width: 64 }
+  return { label: '超大版', width: 80 }
 }
 
 function applyLoadedImage(el: HTMLImageElement, name: string) {
@@ -321,7 +321,7 @@ function applyLoadedImage(el: HTMLImageElement, name: string) {
   // 让裁剪后的主体实际宽度达到档位宽度（避免白边图生成出来的主体过小、细节不足）
   if (removeBg.value && autoCrop.value && !isPixelArt(el)) {
     const ratio = estimateContentRatio(el)
-    targetWidth = Math.min(256, Math.max(tier.width, Math.round(tier.width / ratio)))
+    targetWidth = Math.min(112, Math.max(tier.width, Math.round(tier.width / ratio)))
   }
   width.value = targetWidth
   result.value = null
