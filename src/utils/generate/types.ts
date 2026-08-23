@@ -76,6 +76,8 @@ export interface GenerateCandidateResult {
   previewH: number
   detailScore: number
   lineArt: boolean
+  /** 自动裁剪的偏移（相对于 previewPixels 网格），未裁剪时为 null */
+  crop?: { x: number; y: number; w: number; h: number } | null
   strategyId?: string
   strategyLabel?: string
   strategyFamily?: StrategyFamily

@@ -19,9 +19,9 @@ function baseCandidate(label: string): CandidateConfig {
     width: 0,
     detail: 2,
     enhance: true,
-    saturate: 1.4,
+    saturate: 1.2,
     sharpen: false,
-    contrast: 5,
+    contrast: 4,
     brightness: 0,
     protectDark: 0.84,
     maxColors: 24,
@@ -74,55 +74,55 @@ function buildStrategySpecs(family: StrategyFamily, analysis: ReturnType<typeof 
 
   if (family === 'line-art') {
     return [
-      strategy('line-tight', '线稿紧致', '偏向保线、补洞和强背景清理，适合轮廓明确的黑白/简笔画。', { color: 10, speckle: 30, hole: 30, line: 24, bg: 20, detail: 6 }, [
-        cloneConfig(baseCandidate('line-tight-a'), { width: w(8), saturate: 1.25, contrast: 8, protectDark: 0.95, maxColors: 12, bgThreshold: 14, borderTol: 20, denoise: true, mode: 'nearest', weight: 1.1 }),
-        cloneConfig(baseCandidate('line-tight-b'), { width: w(0), saturate: 1.2, contrast: 6, protectDark: 0.9, maxColors: 10, bgThreshold: 12, borderTol: 18, denoise: true, mode: 'nearest', weight: 1.0 }),
+      strategy('line-tight', '线稿紧致', '偏向保线、补洞和强背景清理，适合轮廓明确的黑白/简笔画。', { color: 8, speckle: 22, hole: 24, line: 26, bg: 16, detail: 10 }, [
+        cloneConfig(baseCandidate('line-tight-a'), { width: w(8), saturate: 1.18, contrast: 6, protectDark: 0.95, maxColors: 8, bgThreshold: 14, borderTol: 20, denoise: true, mode: 'nearest', weight: 1.1 }),
+        cloneConfig(baseCandidate('line-tight-b'), { width: w(0), saturate: 1.12, contrast: 4, protectDark: 0.9, maxColors: 10, bgThreshold: 12, borderTol: 18, denoise: true, mode: 'nearest', weight: 1.0 }),
       ]),
-      strategy('line-safe', '线稿保守', '更少重处理，优先维持线条连续性，避免复杂边缘被误清。', { color: 8, speckle: 24, hole: 26, line: 28, bg: 18, detail: 5 }, [
-        cloneConfig(baseCandidate('line-safe-a'), { width: w(-4), saturate: 1.15, contrast: 5, protectDark: 1.0, maxColors: 14, bgThreshold: 18, borderTol: 24, denoise: false, mode: 'nearest', weight: 0.95 }),
+      strategy('line-safe', '线稿保守', '更少重处理，优先维持线条连续性，避免复杂边缘被误清。', { color: 8, speckle: 20, hole: 20, line: 30, bg: 14, detail: 10 }, [
+        cloneConfig(baseCandidate('line-safe-a'), { width: w(-4), saturate: 1.1, contrast: 3, protectDark: 1.0, maxColors: 10, bgThreshold: 18, borderTol: 26, denoise: false, mode: 'nearest', weight: 0.95 }),
       ]),
     ]
   }
 
   if (family === 'pixel-art') {
     return [
-      strategy('pixel-crisp', '像素锐利', '偏向少处理，保留块面边界和颜色边缘，适合像素画与 Logo。', { color: 16, speckle: 24, hole: 18, line: 12, bg: 12, detail: 10 }, [
-        cloneConfig(baseCandidate('pixel-crisp-a'), { width: w(0), detail: 1, saturate: 1.1, sharpen: false, contrast: 4, protectDark: 0.7, maxColors: 20, bgThreshold: 16, borderTol: 22, denoise: true, mode: 'nearest', weight: 1.2 }),
-        cloneConfig(baseCandidate('pixel-crisp-b'), { width: w(4), detail: 1, saturate: 1.05, sharpen: false, contrast: 2, protectDark: 0.65, maxColors: 16, bgThreshold: 14, borderTol: 20, denoise: true, mode: 'nearest', weight: 1.0 }),
+      strategy('pixel-crisp', '像素锐利', '偏向少处理，保留块面边界和颜色边缘，适合像素画与 Logo。', { color: 18, speckle: 22, hole: 16, line: 10, bg: 10, detail: 16 }, [
+        cloneConfig(baseCandidate('pixel-crisp-a'), { width: w(0), detail: 1, saturate: 1.05, sharpen: false, contrast: 3, protectDark: 0.65, maxColors: 16, bgThreshold: 16, borderTol: 22, denoise: true, mode: 'nearest', weight: 1.2 }),
+        cloneConfig(baseCandidate('pixel-crisp-b'), { width: w(4), detail: 1, saturate: 1.02, sharpen: false, contrast: 2, protectDark: 0.6, maxColors: 14, bgThreshold: 14, borderTol: 20, denoise: true, mode: 'nearest', weight: 1.0 }),
       ]),
-      strategy('pixel-contrast', '像素对比', '稍微强化对比和颜色分离，用来防止小图块糊成一片。', { color: 15, speckle: 20, hole: 18, line: 10, bg: 10, detail: 12 }, [
-        cloneConfig(baseCandidate('pixel-contrast-a'), { width: w(6), detail: 1, saturate: 1.2, sharpen: false, contrast: 8, protectDark: 0.7, maxColors: 18, bgThreshold: 15, borderTol: 22, denoise: true, mode: 'nearest', weight: 0.95 }),
+      strategy('pixel-contrast', '像素对比', '稍微强化对比和颜色分离，用来防止小图块糊成一片。', { color: 16, speckle: 18, hole: 16, line: 8, bg: 8, detail: 22 }, [
+        cloneConfig(baseCandidate('pixel-contrast-a'), { width: w(6), detail: 1, saturate: 1.12, sharpen: false, contrast: 6, protectDark: 0.65, maxColors: 14, bgThreshold: 15, borderTol: 22, denoise: true, mode: 'nearest', weight: 0.95 }),
       ]),
     ]
   }
 
   if (family === 'flat-art') {
     return [
-      strategy('flat-balanced', '扁平均衡', '适合插画、头像、卡通图，平衡色数、碎点和主体轮廓。', { color: 22, speckle: 22, hole: 22, line: 12, bg: 14, detail: 8 }, [
-        cloneConfig(baseCandidate('flat-balanced-a'), { width: w(0), saturate: 1.35, sharpen: false, contrast: 5, protectDark: 0.86, maxColors: 18, bgThreshold: 16, borderTol: 26, denoise: true, mode: 'nearest', weight: 1.2 }),
-        cloneConfig(baseCandidate('flat-balanced-b'), { width: w(6), saturate: 1.3, sharpen: false, contrast: 4, protectDark: 0.82, maxColors: 16, bgThreshold: 14, borderTol: 24, denoise: true, mode: 'nearest', weight: 1.0 }),
+      strategy('flat-balanced', '扁平均衡', '适合插画、头像、卡通图，平衡色数、碎点和主体轮廓。', { color: 16, speckle: 20, hole: 18, line: 10, bg: 14, detail: 18 }, [
+        cloneConfig(baseCandidate('flat-balanced-a'), { width: w(0), saturate: 1.25, sharpen: false, contrast: 4, protectDark: 0.84, maxColors: 22, bgThreshold: 16, borderTol: 26, denoise: true, mode: 'nearest', weight: 1.2 }),
+        cloneConfig(baseCandidate('flat-balanced-b'), { width: w(6), saturate: 1.2, sharpen: false, contrast: 3, protectDark: 0.8, maxColors: 18, bgThreshold: 14, borderTol: 24, denoise: true, mode: 'nearest', weight: 1.0 }),
       ]),
-      strategy('flat-compact', '扁平紧凑', '尽量减少颜色与空洞，更适合需要直接打印和快速拼装的版本。', { color: 28, speckle: 26, hole: 26, line: 10, bg: 10, detail: 6 }, [
-        cloneConfig(baseCandidate('flat-compact-a'), { width: w(-4), saturate: 1.28, sharpen: false, contrast: 3, protectDark: 0.88, maxColors: 12, bgThreshold: 14, borderTol: 22, denoise: true, mode: 'nearest', weight: 1.15 }),
-        cloneConfig(baseCandidate('flat-compact-b'), { width: w(2), saturate: 1.25, sharpen: false, contrast: 4, protectDark: 0.9, maxColors: 14, bgThreshold: 15, borderTol: 24, denoise: true, mode: 'floyd', weight: 0.95 }),
+      strategy('flat-compact', '扁平紧凑', '尽量减少颜色与空洞，适合需要直接打印和快速拼装的版本。', { color: 26, speckle: 22, hole: 22, line: 8, bg: 10, detail: 10 }, [
+        cloneConfig(baseCandidate('flat-compact-a'), { width: w(-4), saturate: 1.22, sharpen: false, contrast: 3, protectDark: 0.86, maxColors: 14, bgThreshold: 14, borderTol: 22, denoise: true, mode: 'nearest', weight: 1.15 }),
+        cloneConfig(baseCandidate('flat-compact-b'), { width: w(2), saturate: 1.2, sharpen: false, contrast: 3, protectDark: 0.88, maxColors: 16, bgThreshold: 15, borderTol: 24, denoise: true, mode: 'floyd', weight: 0.95 }),
       ]),
-      strategy('flat-detail', '扁平细节', '更重视边缘和小结构，适合卡通主体和需要保轮廓的插画。', { color: 20, speckle: 18, hole: 18, line: 18, bg: 12, detail: 14 }, [
-        cloneConfig(baseCandidate('flat-detail-a'), { width: w(8), saturate: 1.42, sharpen: true, contrast: 6, protectDark: 0.78, maxColors: 22, bgThreshold: 16, borderTol: 28, denoise: false, mode: 'nearest', weight: 0.9 }),
+      strategy('flat-detail', '扁平细节', '更重视边缘和小结构，适合卡通主体和需要保轮廓的插画。', { color: 12, speckle: 16, hole: 14, line: 12, bg: 12, detail: 26 }, [
+        cloneConfig(baseCandidate('flat-detail-a'), { width: w(8), saturate: 1.3, sharpen: true, contrast: 5, protectDark: 0.76, maxColors: 28, bgThreshold: 16, borderTol: 28, denoise: false, mode: 'nearest', weight: 0.9 }),
       ]),
     ]
   }
 
   return [
-    strategy('photo-natural', '照片自然', '先保住主体层次，再做背景清理和轻微收色。', { color: 16, speckle: 26, hole: 24, line: 10, bg: 16, detail: 10 }, [
-      cloneConfig(baseCandidate('photo-natural-a'), { width: w(0), saturate: 1.5, sharpen: true, contrast: 8, protectDark: 0.8, maxColors: 32, bgThreshold: 18, borderTol: 30, denoise: true, mode: 'nearest', weight: 1.0 }),
-      cloneConfig(baseCandidate('photo-natural-b'), { width: w(8), saturate: 1.45, sharpen: true, contrast: 6, protectDark: 0.76, maxColors: 28, bgThreshold: 16, borderTol: 28, denoise: true, mode: 'nearest', weight: 0.95 }),
+    strategy('photo-natural', '照片自然', '先保住主体层次，再做背景清理和轻微收色。', { color: 10, speckle: 20, hole: 18, line: 6, bg: 14, detail: 26 }, [
+      cloneConfig(baseCandidate('photo-natural-a'), { width: w(0), saturate: 1.1, sharpen: false, contrast: 5, protectDark: 0.78, maxColors: 40, bgThreshold: 18, borderTol: 30, denoise: true, mode: 'nearest', weight: 1.0 }),
+      cloneConfig(baseCandidate('photo-natural-b'), { width: w(8), saturate: 1.08, sharpen: false, contrast: 4, protectDark: 0.74, maxColors: 36, bgThreshold: 16, borderTol: 28, denoise: true, mode: 'nearest', weight: 0.95 }),
     ]),
-    strategy('photo-floyd', '照片抖动', '用抖动保留渐变和肤色过渡，减少色带。', { color: 14, speckle: 20, hole: 18, line: 8, bg: 14, detail: 14 }, [
-      cloneConfig(baseCandidate('photo-floyd-a'), { width: w(4), saturate: 1.42, sharpen: false, contrast: 6, protectDark: 0.82, maxColors: 24, bgThreshold: 16, borderTol: 28, denoise: true, mode: 'floyd', weight: 1.1 }),
-      cloneConfig(baseCandidate('photo-floyd-b'), { width: w(10), saturate: 1.38, sharpen: false, contrast: 5, protectDark: 0.8, maxColors: 20, bgThreshold: 15, borderTol: 26, denoise: true, mode: 'floyd', weight: 0.95 }),
+    strategy('photo-floyd', '照片抖动', '用抖动保留渐变和肤色过渡，减少色带。', { color: 10, speckle: 22, hole: 20, line: 6, bg: 12, detail: 22 }, [
+      cloneConfig(baseCandidate('photo-floyd-a'), { width: w(4), saturate: 1.05, sharpen: false, contrast: 4, protectDark: 0.8, maxColors: 32, bgThreshold: 16, borderTol: 28, denoise: true, mode: 'floyd', weight: 1.1 }),
+      cloneConfig(baseCandidate('photo-floyd-b'), { width: w(10), saturate: 1.02, sharpen: false, contrast: 3, protectDark: 0.78, maxColors: 28, bgThreshold: 15, borderTol: 26, denoise: true, mode: 'floyd', weight: 0.95 }),
     ]),
-    strategy('photo-compact', '照片紧凑', '减少颜色和碎点，生成更容易买料和拼装的版本。', { color: 24, speckle: 24, hole: 24, line: 10, bg: 14, detail: 4 }, [
-      cloneConfig(baseCandidate('photo-compact-a'), { width: w(-6), saturate: 1.35, sharpen: false, contrast: 4, protectDark: 0.86, maxColors: 16, bgThreshold: 14, borderTol: 24, denoise: true, mode: 'nearest', weight: 1.05 }),
+    strategy('photo-compact', '照片紧凑', '减少颜色和碎点，生成更容易买料和拼装的版本。', { color: 24, speckle: 20, hole: 20, line: 6, bg: 12, detail: 12 }, [
+      cloneConfig(baseCandidate('photo-compact-a'), { width: w(-6), saturate: 1.1, sharpen: false, contrast: 3, protectDark: 0.84, maxColors: 22, bgThreshold: 14, borderTol: 24, denoise: true, mode: 'nearest', weight: 1.05 }),
     ]),
   ]
 }
@@ -162,50 +162,61 @@ export async function generateCandidate(
 
   if (config.removeBg) finalRows = emptyOuterBackground(finalRows, buildGrowBgMask(pixels, autoWidth, height, background))
   if (config.smartBg) finalRows = emptyOuterBackground(finalRows, buildBorderBgMask(pixels, autoWidth, height, config.borderTol))
+  let crop: { x: number; y: number; w: number; h: number } | null = null
+  let outW = autoWidth
+  let outH = height
   if (config.autoCrop) {
     const cropped = cropEmptyBorders(finalRows)
-    if (cropped) finalRows = cropped.rows
+    if (cropped) {
+      crop = { x: cropped.x, y: cropped.y, w: cropped.w, h: cropped.h }
+      finalRows = cropped.rows
+      outW = cropped.w
+      outH = cropped.h
+    }
   }
 
+  // 颜色上限：selectAdaptivePalette 已保证量化只使用 <= maxColors 个色号，
+  // 这里仅兜底合并超限色号（通常无操作），不再重复砍色。
   if (targetMaxColors > 0) {
     finalRows = limitColorCount(finalRows, palette, targetMaxColors).rows
-    if (!lineArt) {
-      const counts = computeUsedCounts(finalRows)
-      let total = 0
-      for (const n of counts.values()) total += n
-      const noiseMin = Math.max(4, Math.min(16, Math.round(total * 0.0025)))
-      finalRows = mergePatternColors(finalRows, palette, { mergeThreshold: 0, noiseMinCount: noiseMin }).rows
-    }
   }
 
-  if (config.denoise) finalRows = removeSpeckles(finalRows, 4)
-  if (!lineArt) finalRows = fillSmallHoles(finalRows)
-  if (lineArt) finalRows = bridgeLineGaps(finalRows, palette)
-  if (config.outline && !lineArt) finalRows = applyOutline(finalRows, palette)
-  if (!lineArt) {
-    const counts = computeUsedCounts(finalRows)
-    let total = 0
-    for (const n of counts.values()) total += n
-    const minKeep = Math.max(4, Math.min(10, Math.round(total * 0.002)))
-    if (minKeep > 2) {
-      finalRows = mergePatternColors(finalRows, palette, { mergeThreshold: 0, noiseMinCount: minKeep }).rows
-      finalRows = removeSpeckles(finalRows, 3)
-      finalRows = fillSmallHoles(finalRows)
+  // 单轮清理：去杂色 + 去噪 + 补洞（不重复处理，避免抹掉细节）
+  if (lineArt) {
+    if (config.denoise) finalRows = removeSpeckles(finalRows, 4)
+    finalRows = bridgeLineGaps(finalRows, palette)
+  } else {
+    const isFloyd = config.mode === 'floyd'
+    if (config.denoise) {
+      // 抖动图本身用细碎过渡色表现渐变，整体色合并会破坏层次，只做簇级去噪
+      if (!isFloyd) {
+        const counts = computeUsedCounts(finalRows)
+        let total = 0
+        for (const n of counts.values()) total += n
+        const noiseMin = Math.max(3, Math.min(8, Math.round(total * 0.0008)))
+        if (noiseMin > 2) {
+          finalRows = mergePatternColors(finalRows, palette, { mergeThreshold: 0, noiseMinCount: noiseMin }).rows
+        }
+      }
+      finalRows = removeSpeckles(finalRows, isFloyd ? 4 : 3)
     }
+    finalRows = fillSmallHoles(finalRows)
   }
+  if (config.outline && !lineArt) finalRows = applyOutline(finalRows, palette)
 
   const totalBeads = finalRows.reduce((sum: number, row: string[]) => sum + row.filter((c: string) => c !== '.').length, 0)
   return {
     rows: finalRows,
     totalBeads,
     config,
-    width: autoWidth,
-    height,
+    width: outW,
+    height: outH,
     previewPixels: pixels,
     previewW: autoWidth,
     previewH: height,
     detailScore: analysis.detailScore,
     lineArt,
+    crop,
     strategyId: strategyMeta?.id,
     strategyLabel: strategyMeta?.label,
     strategyFamily: strategyMeta?.family,
@@ -255,7 +266,13 @@ export async function generateBestPattern(
   let bestWeighted = -Infinity
   for (const c of candidates) {
     const weights = strategies.find((s) => s.id === c.strategyId)?.weights ?? DEFAULT_WEIGHTS
-    const score = scorePattern(c.rows, c.totalBeads, weights)
+    const score = scorePattern(c.rows, c.totalBeads, weights, c.config.maxColors, {
+      pixels: c.previewPixels,
+      w: c.previewW,
+      h: c.previewH,
+      palette: opts.palette,
+      crop: c.crop ?? null,
+    })
     const weighted = score.total * (c.config.weight ?? 1)
     if (weighted > bestWeighted) {
       bestWeighted = weighted
@@ -270,9 +287,9 @@ export async function generateBestPattern(
 
 export const CANDIDATE_PRESETS: CandidateConfig[] = [
   baseCandidate('universal'),
-  cloneConfig(baseCandidate('compact'), { maxColors: 14, saturate: 1.35, contrast: 4, bgThreshold: 14, borderTol: 24, weight: 1.35 }),
-  cloneConfig(baseCandidate('floyd'), { maxColors: 24, saturate: 1.42, contrast: 6, bgThreshold: 16, borderTol: 28, mode: 'floyd', weight: 1.15 }),
-  cloneConfig(baseCandidate('minimal'), { maxColors: 16, saturate: 1.4, contrast: 5, bgThreshold: 18, borderTol: 30, weight: 1.2 }),
-  cloneConfig(baseCandidate('detailed'), { maxColors: 40, saturate: 1.4, sharpen: true, contrast: 8, denoise: false, weight: 0.85 }),
-  cloneConfig(baseCandidate('outline'), { maxColors: 28, saturate: 1.45, bgThreshold: 16, borderTol: 26, outline: true, weight: 0.95 }),
+  cloneConfig(baseCandidate('compact'), { maxColors: 14, saturate: 1.2, contrast: 3, bgThreshold: 14, borderTol: 24, weight: 1.35 }),
+  cloneConfig(baseCandidate('floyd'), { maxColors: 32, saturate: 1.1, contrast: 4, bgThreshold: 16, borderTol: 28, mode: 'floyd', weight: 1.15 }),
+  cloneConfig(baseCandidate('minimal'), { maxColors: 18, saturate: 1.2, contrast: 4, bgThreshold: 18, borderTol: 30, weight: 1.2 }),
+  cloneConfig(baseCandidate('detailed'), { maxColors: 40, saturate: 1.15, sharpen: false, contrast: 5, denoise: false, weight: 0.85 }),
+  cloneConfig(baseCandidate('outline'), { maxColors: 28, saturate: 1.2, bgThreshold: 16, borderTol: 26, outline: true, weight: 0.95 }),
 ]
