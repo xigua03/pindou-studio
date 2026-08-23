@@ -1,7 +1,7 @@
 {
   "name": "pindou-studio",
   "private": true,
-  "version": "1.2.9",
+  "version": "1.3.0",
   "type": "module",
   "description": "Pindou Studio - free online perler bead pattern tools: gallery / image-to-pattern / bead inventory / my patterns",
   "scripts": {
