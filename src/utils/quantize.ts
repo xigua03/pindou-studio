@@ -476,6 +476,7 @@ export function isLineArt(
   let darkSat = 0
   let coloredDark = 0
   let mid = 0
+  let colored = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const o = (y * w + x) * 4
@@ -483,6 +484,7 @@ export function isLineArt(
       const g = d[o + 1]
       const b = d[o + 2]
       const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+      const sat = Math.max(r, g, b) - Math.min(r, g, b)
       colors.add(((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4))
       const onEdge = x < ring || y < ring || x >= w - ring || y >= h - ring
       if (onEdge) {
@@ -492,13 +494,12 @@ export function isLineArt(
       }
       if (lum < 85) {
         dark++
-        const mx = Math.max(r, g, b)
-        const mn = Math.min(r, g, b)
-        darkSat += mx - mn
-        if (mx - mn > 120) coloredDark++
+        darkSat += sat
+        if (sat > 120) coloredDark++
       } else if (lum < 205) {
         mid++
       }
+      if (sat > 55) colored++
     }
   }
   if (bgN === 0) return false
@@ -510,6 +511,8 @@ export function isLineArt(
   const total = w * h
   const darkRatio = dark / total
   const midRatio = mid / total
+  // 彩色像素占比过高说明是彩色卡通/插画（即使线条低饱和），不是黑白线条画
+  if (colored / total > 0.15) return false
   // 深色线条占比适中
   if (darkRatio < 0.008 || darkRatio > 0.55) return false
   // 中间调（抗锯齿灰边）不能太多
@@ -776,46 +779,10 @@ export function imageToGridColors(
   const sw0 = src && src.w > 0 && src.h > 0 ? src.w : img.naturalWidth
   const sh0 = src && src.w > 0 && src.h > 0 ? src.h : img.naturalHeight
 
-  // 像素图/扁平色块图：用最近邻直接缩到网格尺寸，保留锐利边缘（平滑缩放会把色块边界混出灰边）
-  if (isPixelArt(img, src)) {
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-    ctx.imageSmoothingEnabled = false
-    ctx.drawImage(img, sxx, syy, sw0, sh0, 0, 0, width, height)
-    const data = ctx.getImageData(0, 0, width, height).data
-    const out = new Uint8ClampedArray(width * height * 4)
-    for (let i = 0; i < width * height; i++) {
-      const o = i * 4
-      let r = data[o]
-      let g = data[o + 1]
-      let b = data[o + 2]
-      if (brightness !== 0) {
-        const off = brightness * 2.55
-        r += off
-        g += off
-        b += off
-      }
-      if (saturate !== 1) {
-        const [sr, sg, sb] = boostSaturation(r, g, b, saturate)
-        r = sr
-        g = sg
-        b = sb
-      }
-      if (contrast !== 0) {
-        const f = 1 + contrast / 100
-        r = (r - 128) * f + 128
-        g = (g - 128) * f + 128
-        b = (b - 128) * f + 128
-      }
-      out[o] = clamp255(r)
-      out[o + 1] = clamp255(g)
-      out[o + 2] = clamp255(b)
-      out[o + 3] = 255
-    }
-    return out
-  }
+  // 注：扁平图/像素图不再走「最近邻直接缩到网格」的专门路径。
+  // 最近邻按格子中心采样，依赖对齐，会把细描边/小眼睛这类深色细节整块丢掉
+  // （一格落在黄色上描边就消失了）。统一走下面的「超采样 + 每格主色采样」，
+  // 主色采样对色块图同样保持锐边，protectDark 还能保住细深色线，两全其美。
   // 采样分辨率：每个输出格子至少保留 supersample^2 个采样点，供「每格主色采样」统计；
   // 大图限制上限，避免内存与耗时爆炸。
   const naturalMax = Math.max(sw0, sh0)
@@ -1057,39 +1024,44 @@ export function detectBackgroundColor(
     ctx.drawImage(img, 0, 0, S, S)
   }
   const d = ctx.getImageData(0, 0, S, S).data
-  // Sample the outer ring of the downscaled image and pick the most frequent color
+  // 收集外环像素；透明像素按白底合成（与 imageToGridColors 一致，避免透明底被识别成黑色）
   const ring = 4
-  const bins = new Map<number, { r: number; g: number; b: number; n: number }>()
+  const samples: Array<[number, number, number]> = []
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const onEdge = x < ring || y < ring || x >= S - ring || y >= S - ring
       if (!onEdge) continue
       const i = (y * S + x) * 4
-      const r = d[i]
-      const g = d[i + 1]
-      const b = d[i + 2]
-      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
-      const cur = bins.get(key)
-      if (cur) {
-        cur.r += r
-        cur.g += g
-        cur.b += b
-        cur.n++
-      } else {
-        bins.set(key, { r, g, b, n: 1 })
-      }
+      const a = d[i + 3] / 255
+      samples.push([d[i] * a + 255 * (1 - a), d[i + 1] * a + 255 * (1 - a), d[i + 2] * a + 255 * (1 - a)])
     }
   }
-  let best: { r: number; g: number; b: number; n: number } | null = null
-  for (const v of bins.values()) {
-    if (!best || v.n > best.n) best = v
+  if (samples.length === 0) return [255, 255, 255]
+  const avg = (list: Array<[number, number, number]>): [number, number, number] => {
+    let r = 0
+    let g = 0
+    let b = 0
+    for (const [sr, sg, sb] of list) {
+      r += sr
+      g += sg
+      b += sb
+    }
+    return [r / list.length, g / list.length, b / list.length]
   }
-  if (!best) return [255, 255, 255]
-  const rgb: [number, number, number] = [
-    Math.round(best.r / best.n),
-    Math.round(best.g / best.n),
-    Math.round(best.b / best.n)
-  ]
+  // 迭代稳健均值：逐步剔除离群色，避免「平坦的少数色」（如照片里底部衣服）
+  // 因为分桶集中而压过真正的渐变背景
+  let mean = avg(samples)
+  for (let iter = 0; iter < 3; iter++) {
+    const meanLab = rgbToLab(mean[0], mean[1], mean[2])
+    const dists = samples.map((s) => ciede2000(rgbToLab(s[0], s[1], s[2]), meanLab))
+    dists.sort((a, b) => a - b)
+    const med = dists[Math.floor(dists.length / 2)]
+    if (med < 2) break
+    const keep = samples.filter((s) => ciede2000(rgbToLab(s[0], s[1], s[2]), meanLab) <= med * 1.8)
+    if (keep.length < samples.length * 0.15) break
+    mean = avg(keep)
+  }
+  const rgb: [number, number, number] = [Math.round(mean[0]), Math.round(mean[1]), Math.round(mean[2])]
   // 近白色吸附到纯白（截图/图片白底常有轻微色偏，避免背景清不干净）
   if (ciede2000(rgbToLab(rgb[0], rgb[1], rgb[2]), rgbToLab(255, 255, 255)) < 12) {
     return [255, 255, 255]
@@ -1151,6 +1123,89 @@ export function buildBgMask(
       row.push(ciede2000(lab, bgLab) < bg.threshold)
     }
     mask.push(row)
+  }
+  return mask
+}
+
+/**
+ * 渐变背景抠图：从四边与背景色接近的格子开始泛洪，允许相邻格颜色与
+ * 「已生长区域的平均色」缓慢漂移（用指数滑动平均跟随），因此渐变背景
+ * （天空/灯光/径向渐变）能被整片抠掉，而不是只在浅色一圈停下。
+ * 主体内部的同色浅色区域（被主体包围）泛洪到达不了，会保留为豆子。
+ *
+ * 保护逻辑：若背景泛洪把图片中心也覆盖了（>50%），说明是「全出血场景」
+ * （如整幅日落天空、白色画布本身），此时按固定阈值保守处理，避免把
+ * 本来就是内容主体的渐变/背景整片删掉。
+ */
+export function buildGrowBgMask(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  bg: BackgroundConfig
+): boolean[][] {
+  const startLab = rgbToLab(bg.rgb[0], bg.rgb[1], bg.rgb[2])
+  const mask: boolean[][] = Array.from({ length: height }, () => new Array<boolean>(width).fill(false))
+  const queue: [number, number][] = []
+  const startTh = bg.threshold * 1.3
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (y === 0 || y === height - 1 || x === 0 || x === width - 1) {
+        const i = (y * width + x) * 4
+        const lab = rgbToLab(pixels[i], pixels[i + 1], pixels[i + 2])
+        if (ciede2000(lab, startLab) < startTh) {
+          mask[y][x] = true
+          queue.push([x, y])
+        }
+      }
+    }
+  }
+  if (queue.length === 0) return mask
+  // 已生长区域的平均色：指数滑动平均（越新加入的格权重越大），
+  // 权重上限 0.08，单个噪点不会把平均色拉偏，渐变则能逐步跟随
+  let avgR = bg.rgb[0]
+  let avgG = bg.rgb[1]
+  let avgB = bg.rgb[2]
+  let count = 0
+  const growTh = 30
+  while (queue.length > 0) {
+    const [cx, cy] = queue.pop()!
+    count++
+    const wgt = Math.min(0.08, 1 / count)
+    const o = (cy * width + cx) * 4
+    avgR += (pixels[o] - avgR) * wgt
+    avgG += (pixels[o + 1] - avgG) * wgt
+    avgB += (pixels[o + 2] - avgB) * wgt
+    const avgLab = rgbToLab(avgR, avgG, avgB)
+    for (const [nx, ny] of [
+      [cx + 1, cy],
+      [cx - 1, cy],
+      [cx, cy + 1],
+      [cx, cy - 1]
+    ] as Array<[number, number]>) {
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height || mask[ny][nx]) continue
+      const j = (ny * width + nx) * 4
+      const lab = rgbToLab(pixels[j], pixels[j + 1], pixels[j + 2])
+      if (ciede2000(lab, avgLab) < growTh) {
+        mask[ny][nx] = true
+        queue.push([nx, ny])
+      }
+    }
+  }
+  // 中心覆盖检查：中心 20%×20% 区域被背景盖住 > 50% 时，回退到固定阈值
+  let centerBg = 0
+  let centerN = 0
+  const x0 = Math.floor(width * 0.4)
+  const x1 = Math.ceil(width * 0.6)
+  const y0 = Math.floor(height * 0.4)
+  const y1 = Math.ceil(height * 0.6)
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      centerN++
+      if (mask[y][x]) centerBg++
+    }
+  }
+  if (centerN > 0 && centerBg / centerN > 0.5) {
+    return buildBgMask(pixels, width, height, bg)
   }
   return mask
 }
@@ -1331,6 +1386,235 @@ export function buildTableExcluding(palette: BeadPalette, exclude?: Set<string> 
   return colors.map((c) => ({ code: c.code, hex: c.hex, lab: rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]) }))
 }
 
+/**
+ * 自适应调色板：对图片颜色做加权 K-means 聚类（Lab 空间），
+ * 再把每个聚类中心吸附到色卡上最近的颜色，得到「最能代表图片」的 ≤maxColors 个色号。
+ *
+ * 相比「先对全色卡（数百上千色）量化、再事后合并」：
+ *  - 选出的颜色彼此区分度高（聚类保证），不会出现 7 种肤色挤在一起；
+ *  - 每色都有真实像素质量支撑，很少出现「整张图纸只用 3 颗」的僵尸色号；
+ *  - 量化阶段就直接用这个小调色板，噪点大幅减少。
+ *
+ * background 提供时跳过背景色像素（背景格会留空，不应占用色号额度）。
+ * exclude 排除的色号不参与（如「仅用手头颜色」）。
+ */
+export function selectAdaptivePalette(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  palette: BeadPalette,
+  maxColors: number,
+  background?: BackgroundConfig | null,
+  exclude?: Set<string> | null
+): BeadColor[] {
+  if (maxColors <= 0 || palette.colors.length <= 0) return palette.colors
+  const avail = exclude && exclude.size > 0 ? palette.colors.filter((c) => !exclude.has(c.code)) : palette.colors
+  if (avail.length === 0) return palette.colors
+  const K = Math.min(maxColors, avail.length)
+
+  // 1) 直方图（5bit/通道）。背景排除与最终抠图一致：只排除「与边缘连通的背景」，
+  // 内部被主体包围的浅色区域（如卡通肚皮、反光）仍参与聚类，否则会整块被映射成相邻代表色。
+  interface Bucket { r: number; g: number; b: number; n: number; lab: [number, number, number] }
+  const hist = new Map<number, Bucket>()
+  const bgLab = background ? rgbToLab(background.rgb[0], background.rgb[1], background.rgb[2]) : null
+  const th = background?.threshold ?? 0
+  const bgCell = new Uint8Array(width * height)
+  if (bgLab && th > 0) {
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 4
+      bgCell[i] = ciede2000(rgbToLab(pixels[o], pixels[o + 1], pixels[o + 2]), bgLab) < th ? 1 : 0
+    }
+    // 从四周边框泛洪，只标记「连通到边缘」的背景格
+    const queue: number[] = []
+    const seed = (i: number) => {
+      if (bgCell[i] === 1) {
+        bgCell[i] = 2
+        queue.push(i)
+      }
+    }
+    for (let x = 0; x < width; x++) {
+      seed(x)
+      seed((height - 1) * width + x)
+    }
+    for (let y = 0; y < height; y++) {
+      seed(y * width)
+      seed(y * width + width - 1)
+    }
+    while (queue.length > 0) {
+      const i = queue.pop()!
+      const x = i % width
+      const y = (i / width) | 0
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = x + dx
+        const ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+        const j = ny * width + nx
+        if (bgCell[j] === 1) {
+          bgCell[j] = 2
+          queue.push(j)
+        }
+      }
+    }
+  }
+  for (let i = 0; i < width * height; i++) {
+    if (bgCell[i] === 2) continue
+    const o = i * 4
+    const r = pixels[o]
+    const g = pixels[o + 1]
+    const b = pixels[o + 2]
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)
+    const cur = hist.get(key)
+    if (cur) {
+      cur.r += r
+      cur.g += g
+      cur.b += b
+      cur.n++
+    } else {
+      hist.set(key, { r, g, b, n: 1, lab: [0, 0, 0] })
+    }
+  }
+  const buckets = [...hist.values()]
+  if (buckets.length === 0) return avail
+  for (const bk of buckets) {
+    bk.r /= bk.n
+    bk.g /= bk.n
+    bk.b /= bk.n
+    bk.lab = rgbToLab(bk.r, bk.g, bk.b)
+  }
+  buckets.sort((a, b) => b.n - a.n)
+
+  const labDist2 = (a: [number, number, number], b: [number, number, number]): number => {
+    const dl = a[0] - b[0]
+    const da = a[1] - b[1]
+    const db = a[2] - b[2]
+    return dl * dl + da * da + db * db
+  }
+
+  // 2) 种子：取最高频的候选桶做「最远点」初始化（色相覆盖广）
+  const k = Math.min(K, buckets.length)
+  const candidates = buckets.slice(0, Math.max(k, Math.min(buckets.length, k * 4)))
+  const seeds: Bucket[] = [candidates[0]]
+  while (seeds.length < k && seeds.length < candidates.length) {
+    let bestI = -1
+    let bestD = -1
+    for (let i = 0; i < candidates.length; i++) {
+      if (seeds.includes(candidates[i])) continue
+      let minD = Infinity
+      for (const s of seeds) {
+        const d = labDist2(candidates[i].lab, s.lab)
+        if (d < minD) minD = d
+      }
+      if (minD > bestD) {
+        bestD = minD
+        bestI = i
+      }
+    }
+    if (bestI < 0) break
+    seeds.push(candidates[bestI])
+  }
+
+  // 3) 加权 K-means（Lab 欧氏距离，最多 16 轮，稳定即停）
+  interface Centroid { r: number; g: number; b: number; n: number; lab: [number, number, number] }
+  const centroids: Centroid[] = seeds.map((s) => ({ r: s.r, g: s.g, b: s.b, n: s.n, lab: s.lab }))
+  const assign = new Int32Array(buckets.length)
+  for (let iter = 0; iter < 16; iter++) {
+    let changed = false
+    for (let i = 0; i < buckets.length; i++) {
+      let bestC = 0
+      let bestD = Infinity
+      for (let c = 0; c < centroids.length; c++) {
+        const d = labDist2(buckets[i].lab, centroids[c].lab)
+        if (d < bestD) {
+          bestD = d
+          bestC = c
+        }
+      }
+      if (assign[i] !== bestC) {
+        assign[i] = bestC
+        changed = true
+      }
+    }
+    if (!changed) break
+    const sums = centroids.map(() => ({ r: 0, g: 0, b: 0, n: 0 }))
+    for (let i = 0; i < buckets.length; i++) {
+      const bk = buckets[i]
+      const s = sums[assign[i]]
+      s.r += bk.r * bk.n
+      s.g += bk.g * bk.n
+      s.b += bk.b * bk.n
+      s.n += bk.n
+    }
+    for (let c = 0; c < centroids.length; c++) {
+      const s = sums[c]
+      if (s.n > 0) {
+        const r = s.r / s.n
+        const g = s.g / s.n
+        const b = s.b / s.n
+        centroids[c] = { r, g, b, n: s.n, lab: rgbToLab(r, g, b) }
+      } else {
+        centroids[c] = { r: centroids[c].r, g: centroids[c].g, b: centroids[c].b, n: 0, lab: centroids[c].lab }
+      }
+    }
+  }
+
+  // 4) 质心吸附到色卡最近色（CIEDE2000），去重
+  const table = avail.map((c) => ({ code: c.code, lab: rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]) }))
+  const byCode = new Map<string, BeadColor>(avail.map((c) => [c.code, c]))
+  const picked = new Set<string>()
+  const pickedList: BeadColor[] = []
+  for (const c of centroids) {
+    if (c.n <= 0) continue
+    let best = table[0]
+    let bestD = Infinity
+    for (const t of table) {
+      const d = ciede2000(c.lab, t.lab)
+      if (d < bestD) {
+        bestD = d
+        best = t
+      }
+    }
+    if (picked.has(best.code)) continue
+    picked.add(best.code)
+    const bc = byCode.get(best.code)
+    if (bc) pickedList.push(bc)
+  }
+
+  // 5) 覆盖度补色：k-means 会把相近色相（如浅黄肚皮 vs 橙色耳朵）归到同一簇，
+  // 导致某个占比不小的主体区域被映射成「不太对的代表色」。
+  // 对用量较大的桶，若最近的已选色仍偏远（CIEDE2000 > 14），补进它最近的可用色号。
+  if (pickedList.length < maxColors) {
+    const totalN = buckets.reduce((s, b) => s + b.n, 0)
+    const ordered = [...buckets].sort((a, b) => b.n - a.n)
+    for (const bk of ordered) {
+      if (pickedList.length >= maxColors) break
+      // 只补「足够重要」的颜色，避免为了零碎像素堆色号
+      if (bk.n / totalN < 0.004) break
+      let minD = Infinity
+      for (const t of table) {
+        if (!picked.has(t.code)) continue
+        const d = ciede2000(bk.lab, t.lab)
+        if (d < minD) minD = d
+      }
+      if (minD > 14) {
+        let best = table[0]
+        let bestD = Infinity
+        for (const t of table) {
+          if (picked.has(t.code)) continue
+          const d = ciede2000(bk.lab, t.lab)
+          if (d < bestD) {
+            bestD = d
+            best = t
+          }
+        }
+        picked.add(best.code)
+        const bc = byCode.get(best.code)
+        if (bc) pickedList.push(bc)
+      }
+    }
+  }
+  return pickedList
+}
+
 /** 从四周边框像素估算背景色（平均色） */
 export function detectBorderColor(
   pixels: Uint8ClampedArray,
@@ -1501,10 +1785,14 @@ export function applyOutline(rows: string[][], palette: BeadPalette): string[][]
 }
 
 /**
- * 去杂点：把 8 连通的孤立小色块（噪声）替换成周围出现最多的颜色。
- * 卡通胡须/轮廓是较长的连通区域，不会被误删。
+ * 去杂点：把孤立小色块（噪声）替换成周围出现最多的颜色。
+ *  - 清理用 4-连通判定：2x2 棋盘格这类「斜角相连」的噪点会被拆成单格清掉，
+ *    而不是被 8-连通当成一个 4 格簇保留下来；
+ *  - 细线保护：先用 8-连通找出直线（1 格宽、长>=3）和稀疏对角细线（长>=3、
+ *    占包围盒比例 <=0.45）并标记保护，避免把胡须/描边/对角发丝删掉；
+ *  - 修复：不再因为「替换色没有同色邻居」而把格子留空，避免在实心区域挖出空洞。
  */
-export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
+export function removeSpeckles(rows: string[][], minCluster = 4): string[][] {
   const h = rows.length
   if (h === 0) return rows
   const w = rows[0].length
@@ -1512,75 +1800,103 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
   let out = rows.map((r) => [...r])
   const inside = (nx: number, ny: number) => nx >= 0 && ny >= 0 && nx < w && ny < h
 
-  const collectCluster = (grid: string[][], startIdx: number, code: string, visited: Uint8Array): number[] => {
+  const NEIGH4 = [[0, 1], [0, -1], [1, 0], [-1, 0]] as const
+  const NEIGH8 = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const
+
+  const collectCluster = (grid: string[][], startIdx: number, code: string, visited: Uint8Array, conn: 4 | 8): number[] => {
     const stack = [startIdx]
     const cells: number[] = []
     visited[startIdx] = 1
+    const range = conn === 4 ? NEIGH4 : NEIGH8
     while (stack.length > 0) {
       const i = stack.pop()!
       cells.push(i)
       const cx = i % w
       const cy = (i / w) | 0
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue
-          const nx = cx + dx
-          const ny = cy + dy
-          if (!inside(nx, ny)) continue
-          const j = ny * w + nx
-          if (!visited[j] && grid[ny][nx] === code) {
-            visited[j] = 1
-            stack.push(j)
-          }
+      for (const [dx, dy] of range) {
+        const nx = cx + dx
+        const ny = cy + dy
+        if (!inside(nx, ny)) continue
+        const j = ny * w + nx
+        if (!visited[j] && grid[ny][nx] === code) {
+          visited[j] = 1
+          stack.push(j)
         }
       }
     }
     return cells
   }
 
-  const hasSameNeighbor = (cx: number, cy: number, code: string): boolean => {
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue
-        const nx = cx + dx
-        const ny = cy + dy
-        if (!inside(nx, ny)) continue
-        if (out[ny][nx] === code) return true
-      }
+  /** 细线保护：直线（1 格宽、长>=3）或长对角稀疏线（长>=6、占包围盒比例 <=0.45）。
+   *  注意对角保护阈值不能太低：色块边界的抗锯齿过渡色常形成 3~5 格的对角链，
+   *  太短会误当细节保留成杂点；>=6 格的稀疏对角才像真实线条。 */
+  const isLineLike = (cells: number[]): boolean => {
+    if (cells.length < 3) return false
+    let minX = w
+    let minY = h
+    let maxX = -1
+    let maxY = -1
+    for (const i of cells) {
+      const x = i % w
+      const y = (i / w) | 0
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
     }
-    return false
+    const bw = maxX - minX + 1
+    const bh = maxY - minY + 1
+    if ((bw === 1 || bh === 1) && cells.length >= 3) return true
+    return cells.length >= 6 && cells.length / (bw * bh) <= 0.45
   }
 
-  // 最多迭代 5 轮，每轮重新检测小色块
-  for (let pass = 0; pass < 5; pass++) {
+  // 最多迭代 6 轮：每轮先标记细线保护格，再用 4-连通清理小色块
+  for (let pass = 0; pass < 6; pass++) {
+    // 1) 8-连通找出细线结构并保护
+    const protectedCells = new Uint8Array(w * h)
+    {
+      const visited8 = new Uint8Array(w * h)
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x
+          const code = out[y][x]
+          if (visited8[idx] || !code || code === '.') continue
+          const comp = collectCluster(out, idx, code, visited8, 8)
+          if (isLineLike(comp)) {
+            for (const i of comp) protectedCells[i] = 1
+          }
+        }
+      }
+    }
+    // 2) 4-连通清理小色块（保护格跳过）
     const visited = new Uint8Array(w * h)
     let changed = false
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const idx = y * w + x
-        if (visited[idx]) continue
         const code = out[y][x]
+        if (visited[idx] || protectedCells[idx]) {
+          visited[idx] = 1
+          continue
+        }
         if (!code || code === '.') {
           visited[idx] = 1
           continue
         }
-        const cells = collectCluster(out, idx, code, visited)
+        const cells = collectCluster(out, idx, code, visited, 4)
         if (cells.length >= minCluster) continue
         changed = true
         for (const i of cells) {
           const cx = i % w
           const cy = (i / w) | 0
           const votes = new Map<string, number>()
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue
-              const nx = cx + dx
-              const ny = cy + dy
-              if (!inside(nx, ny)) continue
-              const nc = out[ny][nx]
-              if (!nc || nc === '.' || nc === code) continue
-              votes.set(nc, (votes.get(nc) || 0) + 1)
-            }
+          for (const [dx, dy] of NEIGH8) {
+            const nx = cx + dx
+            const ny = cy + dy
+            if (!inside(nx, ny)) continue
+            const nc = out[ny][nx]
+            if (!nc || nc === '.' || nc === code) continue
+            votes.set(nc, (votes.get(nc) || 0) + 1)
           }
           let best = ''
           let bestN = 0
@@ -1588,15 +1904,9 @@ export function removeSpeckles(rows: string[][], minCluster = 3): string[][] {
             bestN = n
             best = c
           }
-          if (!best) {
-            // 周围没有其他颜色可替换时直接留空
-            out[cy][cx] = '.'
-          } else if (hasSameNeighbor(cx, cy, best)) {
-            // 替换后若与同色邻居相连则保留，否则留空（避免 1x1 孤立点）
-            out[cy][cx] = best
-          } else {
-            out[cy][cx] = '.'
-          }
+          // 有非空邻居时替换为邻居主色；只有完全孤立（四周全是空白）时才留空，
+          // 避免在实心色块中间挖出空洞
+          out[cy][cx] = best || '.'
         }
       }
     }

@@ -16,6 +16,27 @@
           }
         } catch (e) {}
       })()
+      // 兼容旧的 #/xxx 深链/分享链接：必须在任何模块加载前转成 History 路径，
+      // 否则 vue-router 创建时会读到旧路径（#/ 开头的 URL 会直接渲染首页）。
+      // location.hash 本身以 '/' 开头（如 "#/generator"），slice(1) 即绝对路径；
+      // 若拼上 pathname 会得到 "//generator"，被解析为协议相对 URL，replaceState 抛 SecurityError。
+      try {
+        if (location.hash.indexOf('#/') === 0) {
+          history.replaceState(null, '', location.hash.slice(1))
+        }
+      } catch (e) {}
+      // 应用已加载后再遇到 #/xxx 跳转（例如从首页点旧链接）：
+      // 纯 hash 变化不会重载页面、也不会重跑上面的代码，需要在 hashchange 里补一次重定向，
+      // 再派发 popstate 通知 vue-router（History 模式监听 popstate）切换路由。
+      try {
+        window.addEventListener('hashchange', function () {
+          if (location.hash.indexOf('#/') === 0) {
+            var p = location.hash.slice(1)
+            history.replaceState(null, '', p)
+            window.dispatchEvent(new PopStateEvent('popstate'))
+          }
+        })
+      } catch (e) {}
     </script>
   </head>
   <body>

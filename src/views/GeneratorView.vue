@@ -8,7 +8,7 @@ import PatternGrid from '../components/PatternGrid.vue'
 import ColorLegend from '../components/ColorLegend.vue'
 import ImageCropper from '../components/ImageCropper.vue'
 import type { CropRect } from '../types'
-import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt, isLineArt, bridgeLineGaps } from '../utils/quantize'
+import { loadImageFromFile, imageToGridColors, quantizeImageAsync, detectBackgroundColor, backgroundFromHex, rgbTripleToHex, cropEmptyBorders, buildGrowBgMask, buildBorderBgMask, emptyOuterBackground, mergePatternColors, applyRemap, nearestUsedCode, limitColorCount, applyOutline, removeSpeckles, convertPatternPalette, estimateContentRatio, isPixelArt, isLineArt, bridgeLineGaps, selectAdaptivePalette, computeUsedCounts } from '../utils/quantize'
 import { computeColorUsage, patternToCanvas, renderPatternSheet, downloadCanvas, exportUsageCSV, downloadText, safeFileName, printPatternTiled } from '../utils/export'
 
 const router = useRouter()
@@ -52,7 +52,7 @@ const brightness = ref(0)
 // 饱和度（0.5 ~ 2.0，1 不变；默认 1.3 增强）
 const saturate = ref(1.3)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
-const maxColors = ref(48)
+const maxColors = ref(32)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
 const outline = ref(false)
 const protectDark = ref(true) // keep thin dark lines (whiskers/outlines), default on
@@ -405,13 +405,36 @@ async function generate() {
       onlyOwnedColors.value && ownedColorCount.value > 0
         ? new Set(palette.value.colors.filter((c) => store.ownedCount(paletteId.value, c.code) <= 0).map((c) => c.code))
         : null
-    const qp = quantizeImageAsync(pixels, w, h, palette.value, lineArt.value ? 'nearest' : mode.value, (p) => (progress.value = p), undefined, exclude)
+    // 自适应调色板：按图片颜色聚类选出最能代表图片的 maxColors 个色号直接量化，
+    // 比「全色卡量化后再合并」更干净（颜色区分度高、几乎没有僵尸色号）
+    let quantPalette = palette.value
+    if (maxColors.value > 0) {
+      const avail =
+        exclude && exclude.size > 0
+          ? { ...palette.value, colors: palette.value.colors.filter((c) => !exclude.has(c.code)) }
+          : palette.value
+      if (avail.colors.length > maxColors.value) {
+        const selected = selectAdaptivePalette(
+          pixels,
+          w,
+          h,
+          avail,
+          maxColors.value,
+          backgroundFromHex(bgColor.value, bgThreshold.value)
+        )
+        quantPalette = { ...avail, colors: selected }
+      } else {
+        quantPalette = avail
+      }
+    }
+    const qp = quantizeImageAsync(pixels, w, h, quantPalette, lineArt.value ? 'nearest' : mode.value, (p) => (progress.value = p), undefined, exclude)
     const { rows } = await qp
 
-    // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）
+    // 背景留空：只去掉从边缘连通的背景区域（图案内部的同色部分保留为豆子）。
+    // 用区域生长抠图：渐变背景（天空/灯光等）也能整片抠掉
     let finalRows = rows
     if (removeBg.value) {
-      const mask = buildBgMask(pixels, w, h, backgroundFromHex(bgColor.value, bgThreshold.value))
+      const mask = buildGrowBgMask(pixels, w, h, backgroundFromHex(bgColor.value, bgThreshold.value))
       finalRows = emptyOuterBackground(finalRows, mask)
     }
 
@@ -458,11 +481,21 @@ async function generate() {
     // 颜色数量上限：自动合并相似色，减少杂色、图案更干净（默认 32 色）
     if (maxColors.value > 0) {
       finalRows = limitColorCount(finalRows, palette.value, maxColors.value).rows
+      // 去杂色：用量极少的颜色合并到最近常用色（避免为了几颗豆专门买一种颜色）。
+      // 像素画/线条画可能有意保留少量细节色，跳过不做
+      const isPixel = isPixelArt(image.value.el, srcRect)
+      if (!isPixel && !lineArt.value) {
+        const counts = computeUsedCounts(finalRows)
+        let total = 0
+        for (const n of counts.values()) total += n
+        const noiseMin = Math.max(3, Math.min(12, Math.round(total * 0.001)))
+        finalRows = mergePatternColors(finalRows, palette.value, { mergeThreshold: 0, noiseMinCount: noiseMin }).rows
+      }
     }
 
-    // 去杂点：删除孤立的单色噪点，让照片类图纸更干净（对卡通细线无影响）
+    // 去杂点：删除孤立的单色噪点，让照片类图纸更干净（细线/描边受保护）
     if (denoise.value) {
-      finalRows = removeSpeckles(finalRows, 3)
+      finalRows = removeSpeckles(finalRows, 4)
     }
     // line-art gap bridging
     if (lineArt.value) {
@@ -761,9 +794,9 @@ function printA4() {
               <select v-model.number="maxColors" class="input !py-1.5">
                 <option :value="0">关闭（全部颜色）</option>
                 <option :value="16">16 色</option>
-                <option :value="24">24 色（接近原图感）</option>
-                <option :value="32">32 色</option>
-                <option :value="48">48 色（推荐）</option>
+                <option :value="24">24 色</option>
+                <option :value="32">32 色（推荐）</option>
+                <option :value="48">48 色（细节更多）</option>
               </select>
               <p class="mt-1 text-[11px] text-stone-400">限制颜色数会自动合并相似色，去掉杂色，图案更干净好拼。</p>
               <label class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs font-medium text-stone-500">
