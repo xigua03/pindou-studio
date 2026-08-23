@@ -122,8 +122,26 @@ async function fetchLatestFromGithub() {
   return releaseInfo || (tagInfo ? { tag: tagInfo, name: tagInfo, notes: '', publishedAt: '' } : null)
 }
 
-/** 通过 CDN 镜像读取 main 分支 package.json 的 version，GitHub API 被墙时兜底 */
+/** 通过 CDN 镜像获取远端版本：GitHub API 被墙时兜底。
+ *  优先用 data.jsdelivr.com 的 tags 列表（实时性最好），
+ *  再回退到 @main 文件缓存（可能有几分钟滞后），最后试 raw.githubusercontent。 */
 async function fetchRemotePackageJsonVersion() {
+  // 1) jsDelivr data API：列出 repo 的全部 tag（已含最新 tag，实时性高）
+  try {
+    const c = new AbortController()
+    const t = setTimeout(() => c.abort(), 8000)
+    const res = await fetch('https://data.jsdelivr.com/v1/package/gh/' + GITHUB_REPO, { signal: c.signal })
+    clearTimeout(t)
+    if (res.ok) {
+      const j = await res.json()
+      const list = Array.isArray(j.versions) ? j.versions.map((v) => String(v)).filter((v) => /^\d+\.\d+\.\d+/.test(v)) : []
+      if (list.length) {
+        const top = list.sort((a, b) => cmpVersions(b, a))[0]
+        return { tag: 'v' + top, name: 'v' + top, notes: '', publishedAt: '', from: 'data.jsdelivr.com' }
+      }
+    }
+  } catch { /* ignore */ }
+  // 2) jsDelivr 文件缓存（@main 可能滞后几分钟）
   const urls = [
     'https://cdn.jsdelivr.net/gh/' + GITHUB_REPO + '@main/package.json',
     'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/package.json'
@@ -158,18 +176,28 @@ export async function getUpdateStatus() {
     latest = await fetchLatestFromGithub()
   } catch { /* ignore */ }
   const latestVersion = latest ? String(latest.tag).replace(/^v/i, '') : ''
-  // 无版本信息时用 git 对比真实远程提交（本地 HEAD vs 远程 origin/HEAD）。
-  // 注意：不要回退到本地缓存的 origin/* ref（git rev-parse origin/main），
-  // 它可能是上次 fetch 的旧值，与本地 HEAD 相同会误判「已是最新版本」。
   const localCommit = gitHead(true)
   const branch = gitBranch()
+  // 始终用 git 查询真实远程提交（github.com 对国内服务器通常比 api.github.com 可达性好）。
+  // 即使 CDN/API 版本号滞后，也能靠提交差异发现更新；反之 git 确认本地已是远程最新时，
+  // 即使 CDN 版本号还停留在旧版（缓存滞后），也判定为「已是最新」并展示当前版本。
   let remoteCommit = ''
-  if (!latestVersion && localCommit) {
+  if (localCommit) {
     remoteCommit = gitRemoteHead()
     if (remoteCommit) remoteCommit = remoteCommit.slice(0, 12)
   }
-  const latestLabel = latestVersion || (remoteCommit ? remoteCommit + ' (' + (branch || 'main') + ')' : '')
-  const hasUpdate = !!(latestVersion && cmpVersions(latestVersion, current) > 0) || !!(remoteCommit && remoteCommit !== localCommit)
+  const versionNewer = !!(latestVersion && cmpVersions(latestVersion, current) > 0)
+  const gitDiffers = !!(remoteCommit && remoteCommit !== localCommit)
+  const gitSame = !!(remoteCommit && remoteCommit === localCommit)
+  const hasUpdate = versionNewer || gitDiffers
+  let latestLabel
+  if (latestVersion) {
+    latestLabel = gitSame ? current : latestVersion
+  } else if (remoteCommit) {
+    latestLabel = gitDiffers ? remoteCommit + ' (' + (branch || 'main') + ')' : current
+  } else {
+    latestLabel = ''
+  }
   // 僵尸状态识别：标记 running 但超过 30 分钟无进展（单步最长 20 分钟），视为上次更新被中断；
   // 若已进入“构建完成待重启”状态，超过 3 分钟仍未确认重启完成，视为重启疑似失败
   let running = !!(status && status.running)
