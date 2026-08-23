@@ -1790,6 +1790,53 @@ export function applyOutline(rows: string[][], palette: BeadPalette): string[][]
 }
 
 /**
+ * 填充内部空洞：被豆子完全包围的空格（四面 + 四角都被非空格包围）用周围主色补上。
+ * 这类洞通常来自抠图残留、局部量化挖空或合并后破洞，会明显拉低可拼性。
+ */
+export function fillSmallHoles(rows: string[][]): string[][] {
+  const h = rows.length
+  if (h === 0) return rows
+  const w = rows[0].length
+  const out = rows.map((r) => [...r])
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (out[y][x] !== '.') continue
+        const neighbors: string[] = []
+        let enclosed = true
+        for (const [dx, dy] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]] as const) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+            enclosed = false
+            break
+          }
+          const c = out[ny][nx]
+          if (c && c !== '.') neighbors.push(c)
+          else enclosed = false
+        }
+        if (!enclosed || neighbors.length < 8) continue
+        const votes = new Map<string, number>()
+        for (const c of neighbors) votes.set(c, (votes.get(c) || 0) + 1)
+        let best = ''
+        let bestN = 0
+        for (const [c, n] of votes) if (n > bestN) {
+          bestN = n
+          best = c
+        }
+        if (best && bestN >= 4) {
+          out[y][x] = best
+          changed = true
+        }
+      }
+    }
+    if (!changed) break
+  }
+  return out
+}
+
+/**
  * 去杂点：把孤立小色块（噪声）替换成周围出现最多的颜色。
  *  - 清理用 4-连通判定：2x2 棋盘格这类「斜角相连」的噪点会被拆成单格清掉，
  *    而不是被 8-连通当成一个 4 格簇保留下来；
