@@ -1318,7 +1318,8 @@ function pollUpdate() {
   window.clearInterval(updTimer)
   window.removeEventListener('visibilitychange', onUpdateVisibility)
   window.addEventListener('visibilitychange', onUpdateVisibility)
-  updTimer = window.setInterval(tickUpdateStatus, 4000)
+  tickUpdateStatus().catch(() => {})
+  updTimer = window.setInterval(tickUpdateStatus, 8000)
 }
 onUnmounted(() => {
   window.clearInterval(updTimer)

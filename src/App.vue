@@ -91,7 +91,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col">
+  <div class="relative isolate flex min-h-screen flex-col">
     <header ref="headerRef" class="no-print sticky top-0 z-40 border-b border-stone-200/70 bg-white/85 backdrop-blur">
       <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4">
         <router-link to="/" class="flex shrink-0 items-center gap-2.5">

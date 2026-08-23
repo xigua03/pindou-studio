@@ -161,6 +161,11 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  painting.value = false
+  selecting.value = false
+  allowLeave = true
+  pendingLeave = null
+  unsavedModal.value = false
 })
 
 function endStroke() {

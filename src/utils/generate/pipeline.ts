@@ -4,7 +4,7 @@
  * 不做多候选评分，一次生成、结果可预期。
  */
 import type { BeadPalette } from '../../types'
-import { backgroundFromHex, bridgeLineGaps, buildBorderBgMask, buildGrowBgMask, cropEmptyBorders, computeUsedCounts, emptyOuterBackground, fillSmallHoles, imageToGridColors, limitColorCount, mergePatternColors, quantizeImageAsync, removeSpeckles, selectAdaptivePalette, applyOutline } from '../quantize'
+import { applyOutline, backgroundFromHex, bridgeLineGaps, buildBgMask, buildBorderBgMask, buildGrowBgMask, cropEmptyBorders, computeUsedCounts, emptyOuterBackground, fillSmallHoles, imageToGridColors, limitColorCount, mergePatternColors, quantizeImageAsync, removeSpeckles, selectAdaptivePalette } from '../quantize'
 import { analyzeImage } from './image'
 import type { CandidateConfig, GenerateBestPatternResult, GenerateCandidateResult, GenerateOptions, ImageType } from './types'
 
@@ -173,12 +173,37 @@ export async function generateCandidate(
     quantPalette = { ...palette, colors: selected }
   }
 
-  const quant = await quantizeImageAsync(pixels, autoWidth, height, quantPalette, lineArt ? 'nearest' : config.mode, onProgress, background, exclude)
+  // 背景安全预检：泛洪覆盖率大本身不危险（线稿/白底 emoji 背景就是很大），
+  // 危险的是「背景色与主体色太接近导致泛洪穿过主体」——
+  // 用紧阈值（只算几乎等于背景色的格子）覆盖率对比：远小于泛洪覆盖率
+  // 说明泛洪吃进了主体（如浅绿背景+绿兔子），此时跳过背景去除保住主体。
+  let safeBg = true
+  if (config.removeBg || config.smartBg) {
+    const totalCells = autoWidth * height
+    const coverageOf = (m: boolean[][]) => {
+      let n = 0
+      for (const row of m) for (const v of row) if (v) n++
+      return n / totalCells
+    }
+    const growCov = config.removeBg ? coverageOf(buildGrowBgMask(pixels, autoWidth, height, background)) : 0
+    const borderCov = config.smartBg ? coverageOf(buildBorderBgMask(pixels, autoWidth, height, config.borderTol)) : 0
+    const aggrCov = Math.max(growCov, borderCov)
+    const tightCov = config.removeBg
+      ? coverageOf(buildBgMask(pixels, autoWidth, height, { ...background, threshold: Math.max(3, Math.round(config.bgThreshold * 0.33)) }))
+      : 0
+    // 泛洪吃穿主体 = 泛洪遮罩明显大于「紧贴背景色」的区域。
+    // 如果泛洪多出来的部分占非背景区域过半，说明背景色与主体太接近，跳过背景去除。
+    const nonBg = 1 - tightCov
+    const floodThrough = Math.max(0, aggrCov - tightCov)
+    safeBg = aggrCov <= 0.7 || (nonBg > 0.05 && floodThrough / nonBg < 0.5)
+  }
+
+  const quant = await quantizeImageAsync(pixels, autoWidth, height, quantPalette, lineArt ? 'nearest' : config.mode, onProgress, safeBg ? background : null, exclude)
   let finalRows = quant.rows
 
-  // 背景处理
-  if (config.removeBg) finalRows = emptyOuterBackground(finalRows, buildGrowBgMask(pixels, autoWidth, height, background))
-  if (config.smartBg) finalRows = emptyOuterBackground(finalRows, buildBorderBgMask(pixels, autoWidth, height, config.borderTol))
+  // 背景去除（仅在安全时执行）
+  if (safeBg && config.removeBg) finalRows = emptyOuterBackground(finalRows, buildGrowBgMask(pixels, autoWidth, height, background))
+  if (safeBg && config.smartBg) finalRows = emptyOuterBackground(finalRows, buildBorderBgMask(pixels, autoWidth, height, config.borderTol))
 
   // 裁剪空白
   let crop: { x: number; y: number; w: number; h: number } | null = null
