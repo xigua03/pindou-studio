@@ -114,7 +114,35 @@ async function fetchLatestFromGithub() {
       ? { tag: tagInfo, name: tagInfo, notes: '', publishedAt: '' }
       : releaseInfo
   }
+  // GitHub API 不可达（国内服务器常见）时，回退读取 CDN 上 main 分支的 package.json 版本号
+  if (!releaseInfo && !tagInfo) {
+    const viaCdn = await fetchRemotePackageJsonVersion()
+    if (viaCdn) return viaCdn
+  }
   return releaseInfo || (tagInfo ? { tag: tagInfo, name: tagInfo, notes: '', publishedAt: '' } : null)
+}
+
+/** 通过 CDN 镜像读取 main 分支 package.json 的 version，GitHub API 被墙时兜底 */
+async function fetchRemotePackageJsonVersion() {
+  const urls = [
+    'https://cdn.jsdelivr.net/gh/' + GITHUB_REPO + '@main/package.json',
+    'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/package.json'
+  ]
+  for (const url of urls) {
+    try {
+      const c = new AbortController()
+      const t = setTimeout(() => c.abort(), 8000)
+      const res = await fetch(url, { signal: c.signal })
+      clearTimeout(t)
+      if (!res.ok) continue
+      const j = await res.json()
+      const v = String(j.version || '')
+      if (/^\d+\.\d+\.\d+/.test(v)) {
+        return { tag: 'v' + v, name: 'v' + v, notes: '', publishedAt: '', from: url }
+      }
+    } catch { /* ignore */ }
+  }
+  return null
 }
 
 /** 是否处于“构建完成待重启”状态（新脚本写入 needsRestart，旧卡死状态 step 含“重启服务”） */
@@ -130,19 +158,15 @@ export async function getUpdateStatus() {
     latest = await fetchLatestFromGithub()
   } catch { /* ignore */ }
   const latestVersion = latest ? String(latest.tag).replace(/^v/i, '') : ''
-  // 无 Release 时用 git 提交对比（本地 HEAD vs 远程 origin/HEAD）
+  // 无版本信息时用 git 对比真实远程提交（本地 HEAD vs 远程 origin/HEAD）。
+  // 注意：不要回退到本地缓存的 origin/* ref（git rev-parse origin/main），
+  // 它可能是上次 fetch 的旧值，与本地 HEAD 相同会误判「已是最新版本」。
   const localCommit = gitHead(true)
   const branch = gitBranch()
   let remoteCommit = ''
   if (!latestVersion && localCommit) {
     remoteCommit = gitRemoteHead()
     if (remoteCommit) remoteCommit = remoteCommit.slice(0, 12)
-    if (!remoteCommit) {
-      try {
-        const r = execFileSync('git', ['rev-parse', '--short=12', 'origin/' + (branch || 'main')], { cwd: ROOT, encoding: 'utf8', timeout: 5000 })
-        remoteCommit = String(r || '').trim()
-      } catch { /* ignore */ }
-    }
   }
   const latestLabel = latestVersion || (remoteCommit ? remoteCommit + ' (' + (branch || 'main') + ')' : '')
   const hasUpdate = !!(latestVersion && cmpVersions(latestVersion, current) > 0) || !!(remoteCommit && remoteCommit !== localCommit)
