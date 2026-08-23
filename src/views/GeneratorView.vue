@@ -38,7 +38,6 @@ const bgThreshold = ref(18) // 背景阈值（CIEDE2000）
 const bgColor = ref('#FFFFFF') // 背景色
 const autoCrop = ref(true) // 自动裁剪空白边距
 const showMargin = ref(true) // 底板外围留空显示（预览/下载按底板补齐，空位显示为空格子）
-const sharpen = ref(true) // 边缘锐化
 // 图片细节丰富度：缩到 128 宽后统计的独特颜色数，越高越复杂（照片数百上千，卡通几十）
 const detailScore = ref(0)
 const detailNote = ref('')
@@ -46,12 +45,12 @@ const detailNote = ref('')
 const cropEnabled = ref(false)
 const cropRect = ref<CropRect | null>(null)
 const cropOpen = ref(false) // 裁剪面板是否展开（确认后收起面板但保留裁剪选区）
-// 对比度（-50 ~ +50，0 不变）
-const contrast = ref(8)
+// 对比度（-50 ~ +50，0 不变；默认 5，温和增强轮廓）
+const contrast = ref(5)
 // 亮度（-50 ~ +50，0 不变）
 const brightness = ref(0)
-// 饱和度（0.5 ~ 2.0，1 不变；默认 1.6，通用自动生成更稳）
-const saturate = ref(1.6)
+// 饱和度（0.5 ~ 2.0，1 不变；默认 1.15，轻微提色，避免过艳失真）
+const saturate = ref(1.15)
 // 颜色数量上限（0=关闭，默认 32，减少杂色更干净）
 const maxColors = ref(32)
 // 深色描边：把外边缘加深色轮廓（类似卡通描边）
@@ -59,6 +58,8 @@ const outline = ref(false)
 const protectDark = ref(true) // keep thin dark lines (whiskers/outlines), default on
 // 去杂点：清理孤立的单色噪点，让画面更干净
 const denoise = ref(true)
+// 边缘锐化：默认关闭（锐化会在量化后产生噪点，需要时再开）
+const sharpen = ref(false)
 // 仅用手头颜色（豆仓）
 const onlyOwnedColors = ref(false)
 // 底板尺寸（固定 29×29 标准板）：仅用于结果区的底板排布参考与外围留空显示，不向用户暴露「板数」参数
@@ -416,6 +417,20 @@ async function generate() {
         mode: mode.value,
         bgColor: bgColor.value,
         bgThreshold: bgThreshold.value,
+        // 高级设置：真正透传给生成管线
+        detail: detail.value,
+        enhance: enhance.value,
+        saturate: saturate.value,
+        sharpen: sharpen.value,
+        contrast: contrast.value,
+        brightness: brightness.value,
+        protectDark: protectDark.value,
+        denoise: denoise.value,
+        outline: outline.value,
+        removeBg: removeBg.value,
+        smartBg: smartBg.value,
+        autoCrop: autoCrop.value,
+        borderTol: borderTol.value,
       },
       (p) => (progress.value = p)
     )
@@ -459,8 +474,8 @@ function rename() {
 function applyBeadStyle() {
   mode.value = 'nearest'
   maxColors.value = 24
-  contrast.value = 20
-  saturate.value = 1.5
+  contrast.value = 12
+  saturate.value = 1.3
   brightness.value = 0
   sharpen.value = true
   protectDark.value = true

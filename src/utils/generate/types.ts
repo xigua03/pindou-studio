@@ -52,6 +52,12 @@ export interface PatternScore {
   }
 }
 
+/** 图片类型：决定默认生成参数（单一路线，不叠加候选） */
+export type ImageType = 'line-art' | 'pixel-art' | 'flat-art' | 'photo'
+
+/**
+ * 生成参数。所有字段可选：传了就用用户的，没传就按图片类型走预设。
+ */
 export interface GenerateOptions {
   image: HTMLImageElement
   palette: BeadPalette
@@ -63,6 +69,20 @@ export interface GenerateOptions {
   paletteId?: string
   bgColor?: string
   bgThreshold?: number
+  /** 以下高级参数由生成页「高级设置」透传；缺省时走图片类型预设 */
+  detail?: number
+  enhance?: boolean
+  saturate?: number
+  sharpen?: boolean
+  contrast?: number
+  brightness?: number
+  protectDark?: number | boolean
+  denoise?: boolean
+  outline?: boolean
+  removeBg?: boolean
+  smartBg?: boolean
+  autoCrop?: boolean
+  borderTol?: number
 }
 
 export interface GenerateCandidateResult {
@@ -76,16 +96,17 @@ export interface GenerateCandidateResult {
   previewH: number
   detailScore: number
   lineArt: boolean
+  imageType?: ImageType
   /** 自动裁剪的偏移（相对于 previewPixels 网格），未裁剪时为 null */
   crop?: { x: number; y: number; w: number; h: number } | null
   strategyId?: string
   strategyLabel?: string
-  strategyFamily?: StrategyFamily
+  strategyFamily?: string
   strategyReason?: string
 }
 
 export interface GenerateBestPatternResult extends GenerateCandidateResult {
-  score: PatternScore
+  score: PatternScore | null
 }
 
 export interface ImageAnalysis {
